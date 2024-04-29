@@ -381,6 +381,34 @@ def Test_disassemble_import_autoload()
   v9.CheckScriptSuccess(lines)
 enddef
 
+def Test_disassemble_import_autoload_autoload()
+  mkdir('Xauto_auto/autoload', 'pR')
+  var lines =<< trim END
+    vim9script
+    export const val = 11
+  END
+  writefile(lines, 'Xauto_auto/autoload/Xauto_vars_f1.vim')
+
+  lines =<< trim END
+    vim9script
+
+    import autoload './Xauto_auto/autoload/Xauto_vars_f1.vim' as f1
+    def F()
+        f1.val = 13
+    enddef
+    var res = execute('disass F')
+
+    assert_match('<SNR>\d*_F.*' ..
+      'f1.val = 13\_s*' ..
+      '\d PUSHNR 13\_s*' ..
+      '\d SOURCE .*/Xauto_auto/autoload/Xauto_vars_f1.vim\_s*' ..
+      '\d STOREEXPORT val in .*/Xauto_auto/autoload/Xauto_vars_f1.vim\_s*' ..
+      '\d RETURN void',
+      res)
+  END
+  v9.CheckScriptSuccess(lines)
+enddef
+
 def s:ScriptFuncStore()
   var localnr = 1
   localnr = 2
@@ -1030,7 +1058,7 @@ def Test_disassemble_closure_in_loop()
 
         'endif\_s*' ..
         'g:Ref = () => ii\_s*' ..
-        '\d\+ FUNCREF <lambda>4 vars  $3-$3\_s*' ..
+        '\d\+ FUNCREF <lambda>\d\+ vars  $3-$3\_s*' ..
         '\d\+ STOREG g:Ref\_s*' ..
 
         'continue\_s*' ..
@@ -3433,6 +3461,38 @@ def Test_disassemble_object_len()
     '3 BCALL len(argc 1)\_s*' ..
     '4 STORE $1\_s*' ..
     '5 RETURN void', g:instr)
+  unlet g:instr
+enddef
+
+" Disassemble instructions for using a compound operator in a closure
+def Test_disassemble_compound_op_in_closure()
+  var lines =<< trim END
+    vim9script
+    class A
+      var foo: number = 1
+      def Foo(): func
+        var Fn = () => {
+          this.foo += 1
+        }
+        return Fn
+      enddef
+    endclass
+    var a = A.new()
+    var Lambda = a.Foo()
+    var num = matchstr(string(Lambda), '\d\+')
+    g:instr = execute($'disassemble <lambda>{num}')
+  END
+  v9.CheckScriptSuccess(lines)
+  assert_match('<lambda>\d\+\_s*' ..
+    'this.foo += 1\_s*' ..
+    '0 LOADOUTER level 0 $0\_s*' ..
+    '1 OBJ_MEMBER 0\_s*' ..
+    '2 PUSHNR 1\_s*' ..
+    '3 OPNR +\_s*' ..
+    '4 PUSHNR 0\_s*' ..
+    '5 LOADOUTER level 0 $0\_s*' ..
+    '6 STOREINDEX object\_s*' ..
+    '7 RETURN void', g:instr)
   unlet g:instr
 enddef
 

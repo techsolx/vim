@@ -1,6 +1,6 @@
 # NSIS file to create a self-installing exe for Vim.
 # It requires NSIS version 3.0 or later.
-# Last Change:	2024 Mar 17
+# Last Change:	2024 Mar 20
 
 Unicode true
 
@@ -17,7 +17,7 @@ Unicode true
   !define VIMRT ".."
 !endif
 
-# Location of extra tools: diff.exe
+# Location of extra tools: diff.exe, winpty{32|64}.dll, winpty-agent.exe, etc.
 !ifndef VIMTOOLS
   !define VIMTOOLS ..\..
 !endif
@@ -29,29 +29,40 @@ Unicode true
   !define GETTEXT ${VIMRT}
 !endif
 
-# Comment the next line if you don't have UPX.
-# Get it at https://upx.github.io/
-!define HAVE_UPX
+# If you have UPX, use the switch /DHAVE_UPX=1 on the command line makensis.exe.
+# This property will be set to 1. Get it at https://upx.github.io/
+!ifndef HAVE_UPX
+  !define HAVE_UPX 0
+!endif
 
-# Comment the next line if you do not want to add Native Language Support
-!define HAVE_NLS
+# If you do not want to add Native Language Support, use the switch /DHAVE_NLS=0
+# in the command line makensis.exe. This property will be set to 0.
+!ifndef HAVE_NLS
+  !define HAVE_NLS 1
+!endif
 
-# Comment the following line to create an English-only installer:
-!define HAVE_MULTI_LANG
+# To create an English-only the installer, use the switch /DHAVE_MULTI_LANG=0 on
+# the command line makensis.exe. This property will be set to 0.
+!ifndef HAVE_MULTI_LANG
+  !define HAVE_MULTI_LANG 1
+!endif
 
-# Uncomment the next line if you want to create a 64-bit installer.
-#!define WIN64
+# if you want to create a 64-bit the installer, use the switch /DWIN64=1 on
+# the command line makensis.exe. This property will be set to 1.
+!ifndef WIN64
+  !define WIN64 0
+!endif
 
 !include gvim_version.nsh	# for version number
 
-# Definition of Patch for Vim
+# Definition of Patch for Vim.
 !ifndef PATCHLEVEL
   !define PATCHLEVEL 0
 !endif
 
 # ----------- No configurable settings below this line -----------
 
-!include "Library.nsh"		# For DLL install
+!include "Library.nsh"		# for DLL install
 !include "LogicLib.nsh"
 !include "MUI2.nsh"
 !include "nsDialogs.nsh"
@@ -93,7 +104,7 @@ Unicode true
 !define UNINST_REG_KEY	"Software\Microsoft\Windows\CurrentVersion\Uninstall"
 !define UNINST_REG_KEY_VIM  "${UNINST_REG_KEY}\${PRODUCT}"
 
-!ifdef WIN64
+!if ${WIN64}
 Name "${PRODUCT} (x64)"
 !else
 Name "${PRODUCT}"
@@ -106,11 +117,11 @@ ManifestDPIAware true
 SetDatablockOptimize on
 RequestExecutionLevel highest
 
-!ifdef HAVE_UPX
+!if ${HAVE_UPX}
   !packhdr temp.dat "upx --best --compress-icons=1 temp.dat"
 !endif
 
-!ifdef WIN64
+!if ${WIN64}
 !define BIT	64
 !else
 !define BIT	32
@@ -127,6 +138,8 @@ RequestExecutionLevel highest
 
 # Show all languages, despite user's codepage:
 !define MUI_LANGDLL_ALLLANGUAGES
+# Always show dialog choice language
+#!define MUI_LANGDLL_ALWAYSSHOW
 !define MUI_LANGDLL_REGISTRY_ROOT       "HKCU"
 !define MUI_LANGDLL_REGISTRY_KEY        "Software\Vim"
 !define MUI_LANGDLL_REGISTRY_VALUENAME  "Installer Language"
@@ -144,13 +157,13 @@ RequestExecutionLevel highest
 
 !define MUI_COMPONENTSPAGE_SMALLDESC
 !define MUI_LICENSEPAGE_CHECKBOX
-!define MUI_FINISHPAGE_RUN
-!define MUI_FINISHPAGE_RUN_FUNCTION        LaunchApplication
-!define MUI_FINISHPAGE_RUN_TEXT            $(str_show_readme)
+!define MUI_FINISHPAGE_SHOWREADME
+!define MUI_FINISHPAGE_SHOWREADME_TEXT	    $(str_show_readme)
+!define MUI_FINISHPAGE_SHOWREADME_FUNCTION  LaunchApplication
 
 # This adds '\Vim' to the user choice automagically.  The actual value is
 # obtained below with CheckOldVim.
-!ifdef WIN64
+!if ${WIN64}
   !define DEFAULT_INSTDIR "$PROGRAMFILES64\Vim"
 !else
   !define DEFAULT_INSTDIR "$PROGRAMFILES\Vim"
@@ -170,7 +183,7 @@ SilentInstall normal
 
 # Installer pages
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "${VIMRT}\doc\uganda.nsis.txt"
+!insertmacro MUI_PAGE_LICENSE $(page_lic_file)
 !insertmacro MUI_PAGE_COMPONENTS
 Page custom SetCustom ValidateCustom
 #!define MUI_PAGE_CUSTOMFUNCTION_LEAVE VimFinalCheck
@@ -194,7 +207,7 @@ Page custom SetCustom ValidateCustom
 !include "lang\english.nsi"
 
 # Include support for other languages:
-!ifdef HAVE_MULTI_LANG
+!if ${HAVE_MULTI_LANG}
     !include "lang\danish.nsi"
     !include "lang\dutch.nsi"
     !include "lang\german.nsi"
@@ -212,7 +225,7 @@ Page custom SetCustom ValidateCustom
 # Version resources
 
 VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductName" "Vim"
-VIAddVersionKey /LANG=${LANG_ENGLISH} "CompanyName" "Vim Developers"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "CompanyName" "The Vim Project"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalTrademarks" "Vim"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalCopyright" "Copyright (C) 1996"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "FileDescription" "Vi Improved - A Text Editor"
@@ -352,7 +365,7 @@ FunctionEnd
 
 Function LaunchApplication
    SetOutPath $0
-   ShellExecAsUser::ShellExecAsUser "" "$0\gvim.exe" '-R "$0\README.txt"'
+   ShellExecAsUser::ShellExecAsUser "" "$0\gvim.exe" '-R "$0\$(vim_readme_file)"'
 FunctionEnd
 
 ##########################################################
@@ -598,10 +611,114 @@ SectionGroup $(str_group_plugin) id_group_plugin
 SectionGroupEnd
 
 ##########################################################
-!ifdef HAVE_NLS
+!if ${HAVE_NLS}
 Section "$(str_section_nls)" id_section_nls
 	SectionIn 1 3
 
+#; FIXME: When adding new translations, do not forget to make changes here.
+	SetOutPath $0
+!if /FileExists ..\README.dax.txt
+    ${If} $Language = ${LANG_DANISH}
+	File ..\README.dax.txt
+    ${EndIf}
+!endif
+!if /FileExists ..\README.nlx.txt
+    ${If} $Language = ${LANG_DUTCH}
+	File ..\README.nlx.txt
+    ${EndIf}
+!endif
+!if /FileExists ..\README.dex.txt
+    ${If} $Language = ${LANG_GERMAN}
+	File ..\README.dex.txt
+    ${EndIf}
+!endif
+!if /FileExists ..\README.itx.txt
+    ${If} $Language = ${LANG_ITALIAN}
+	File ..\README.itx.txt
+    ${EndIf}
+!endif
+!if /FileExists ..\README.jax.txt
+    ${If} $Language = ${LANG_JAPANESE}
+	File ..\README.jax.txt
+    ${EndIf}
+!endif
+!if /FileExists ..\README.rux.txt
+    ${If} $Language = ${LANG_RUSSIAN}
+	File ..\README.rux.txt
+    ${EndIf}
+!endif
+!if /FileExists ..\README.srx.txt
+    ${If} $Language = ${LANG_SERBIAN}
+	File ..\README.srx.txt
+    ${EndIf}
+!endif
+!if /FileExists ..\README.cnx.txt
+    ${If} $Language = ${LANG_SIMPCHINESE}
+	File ..\README.cnx.txt
+    ${EndIf}
+!endif
+!if /FileExists ..\README.twx.txt
+    ${If} $Language = ${LANG_TRADCHINESE}
+	File ..\README.twx.txt
+    ${EndIf}
+!endif
+!if /FileExists ..\README.trx.txt
+    ${OrIf} $Language = ${LANG_TURKISH}
+	File ..\README.trx.txt
+    ${EndIf}
+!endif
+#; FIXME: When adding new translations, do not forget to make changes here.
+	SetOutPath $0\doc
+!if /FileExists "${VIMRT}\doc\uganda.dax"
+    ${If} $Language = ${LANG_DANISH}
+	File ${VIMRT}\doc\uganda.dax
+    ${EndIf}
+!endif
+!if /FileExists "${VIMRT}\doc\uganda.nlx"
+    ${If} $Language = ${LANG_DUTCH}
+	File ${VIMRT}\doc\uganda.nlx
+    ${EndIf}
+!endif
+!if /FileExists "${VIMRT}\doc\uganda.dex"
+    ${If} $Language = ${LANG_GERMAN}
+	File ${VIMRT}\doc\uganda.dex
+    ${EndIf}
+!endif
+!if /FileExists "${VIMRT}\doc\uganda.itx"
+    ${If} $Language = ${LANG_ITALIAN}
+	File ${VIMRT}\doc\uganda.itx
+    ${EndIf}
+!endif
+!if /FileExists "${VIMRT}\doc\uganda.jax"
+    ${If} $Language = ${LANG_JAPANESE}
+	File ${VIMRT}\doc\uganda.jax
+    ${EndIf}
+!endif
+!if /FileExists "${VIMRT}\doc\uganda.rux"
+    ${If} $Language = ${LANG_RUSSIAN}
+	File ${VIMRT}\doc\uganda.rux
+    ${EndIf}
+!endif
+!if /FileExists "${VIMRT}\doc\uganda.srx"
+    ${If} $Language = ${LANG_SERBIAN}
+	File ${VIMRT}\doc\uganda.srx
+    ${EndIf}
+!endif
+!if /FileExists "${VIMRT}\doc\uganda.cnx"
+    ${If} $Language = ${LANG_SIMPCHINESE}
+	File ${VIMRT}\doc\uganda.cnx
+    ${EndIf}
+!endif
+!if /FileExists "${VIMRT}\doc\uganda.twx"
+    ${If} $Language = ${LANG_TRADCHINESE}
+	File ${VIMRT}\doc\uganda.twx
+    ${EndIf}
+!endif
+!if /FileExists "${VIMRT}\doc\uganda.trx"
+    ${If} $Language = ${LANG_TURKISH}
+	File ${VIMRT}\doc\uganda.trx
+    ${EndIf}
+!endif
 	SetOutPath $0\lang
 	File /r /x Makefile ${VIMRT}\lang\*.*
 	SetOutPath $0
@@ -611,12 +728,12 @@ Section "$(str_section_nls)" id_section_nls
 	!insertmacro InstallLib DLL NOTSHARED REBOOT_NOTPROTECTED \
 	    "${GETTEXT}\gettext${BIT}\libiconv-2.dll" \
 	    "$0\libiconv-2.dll" "$0"
-  !if /FileExists "${GETTEXT}\gettext${BIT}\libgcc_s_sjlj-1.dll"
-	# Install libgcc_s_sjlj-1.dll only if it is needed.
-	!insertmacro InstallLib DLL NOTSHARED REBOOT_NOTPROTECTED \
-	    "${GETTEXT}\gettext${BIT}\libgcc_s_sjlj-1.dll" \
-	    "$0\libgcc_s_sjlj-1.dll" "$0"
-  !endif
+# Install libgcc_s_sjlj-1.dll only if it is needed.
+#  !if /FileExists "${GETTEXT}\gettext${BIT}\libgcc_s_sjlj-1.dll"
+#	!insertmacro InstallLib DLL NOTSHARED REBOOT_NOTPROTECTED \
+#	    "${GETTEXT}\gettext${BIT}\libgcc_s_sjlj-1.dll" \
+#	    "$0\libgcc_s_sjlj-1.dll" "$0"
+#  !endif
 
 	${If} ${SectionIsSelected} ${id_section_editwith}
 	  ${If} ${RunningX64}
@@ -642,12 +759,12 @@ Section "$(str_section_nls)" id_section_nls
 	  !insertmacro InstallLib DLL NOTSHARED REBOOT_NOTPROTECTED \
 	      "${GETTEXT}\gettext32\libiconv-2.dll" \
 	      "$0\GvimExt32\libiconv-2.dll" "$0\GvimExt32"
-  !if /FileExists "${GETTEXT}\gettext32\libgcc_s_sjlj-1.dll"
-	  # Install libgcc_s_sjlj-1.dll only if it is needed.
-	  !insertmacro InstallLib DLL NOTSHARED REBOOT_NOTPROTECTED \
-	      "${GETTEXT}\gettext32\libgcc_s_sjlj-1.dll" \
-	      "$0\GvimExt32\libgcc_s_sjlj-1.dll" "$0\GvimExt32"
-  !endif
+# Install libgcc_s_sjlj-1.dll only if it is needed.
+#  !if /FileExists "${GETTEXT}\gettext32\libgcc_s_sjlj-1.dll"
+#	  !insertmacro InstallLib DLL NOTSHARED REBOOT_NOTPROTECTED \
+#	      "${GETTEXT}\gettext32\libgcc_s_sjlj-1.dll" \
+#	      "$0\GvimExt32\libgcc_s_sjlj-1.dll" "$0\GvimExt32"
+#  !endif
 	${EndIf}
 SectionEnd
 !endif
@@ -688,7 +805,7 @@ Section -post
 	  SectionGetSize ${id_section_editwith} $4
 	  IntOp $3 $3 + $4
 	${EndIf}
-!ifdef HAVE_NLS
+!if ${HAVE_NLS}
 	${If} ${SectionIsSelected} ${id_section_nls}
 	  SectionGetSize ${id_section_nls} $4
 	  IntOp $3 $3 + $4
@@ -718,7 +835,7 @@ Section -post
 	!insertmacro SaveSectionSelection ${id_section_vimrc}      "select_vimrc"
 	!insertmacro SaveSectionSelection ${id_section_pluginhome} "select_pluginhome"
 	!insertmacro SaveSectionSelection ${id_section_pluginvim}  "select_pluginvim"
-!ifdef HAVE_NLS
+!if ${HAVE_NLS}
 	!insertmacro SaveSectionSelection ${id_section_nls}        "select_nls"
 !endif
 	${If} ${RunningX64}
@@ -751,7 +868,7 @@ SectionEnd
 !macroend
 
 Function .onInit
-!ifdef HAVE_MULTI_LANG
+!if ${HAVE_MULTI_LANG}
   # Select a language (or read from the registry).
   !insertmacro MUI_LANGDLL_DISPLAY
 !endif
@@ -789,7 +906,7 @@ Function .onInit
   !insertmacro LoadSectionSelection ${id_section_vimrc}      "select_vimrc"
   !insertmacro LoadSectionSelection ${id_section_pluginhome} "select_pluginhome"
   !insertmacro LoadSectionSelection ${id_section_pluginvim}  "select_pluginvim"
-!ifdef HAVE_NLS
+!if ${HAVE_NLS}
   !insertmacro LoadSectionSelection ${id_section_nls}        "select_nls"
 !endif
   # Load the default _vimrc settings from the registry (if any).
@@ -847,12 +964,12 @@ Function SetCustom
 
 
 	# 1st group - Compatibility
-	${NSD_CreateGroupBox} 0 0 100% 32% $(str_msg_compat_title)
+	${NSD_CreateGroupBox} 0u 0u 296u 44u $(str_msg_compat_title)
 	Pop $3
 
-	${NSD_CreateLabel} 5% 10% 35% 8% $(str_msg_compat_desc)
+	${NSD_CreateLabel} 16u 14u 269u 10u $(str_msg_compat_desc)
 	Pop $3
-	${NSD_CreateDropList} 18% 19% 75% 8% ""
+	${NSD_CreateDropList} 42u 26u 237u 13u ""
 	Pop $vim_nsd_compat
 	${NSD_CB_AddString} $vim_nsd_compat $(str_msg_compat_vi)
 	${NSD_CB_AddString} $vim_nsd_compat $(str_msg_compat_vim)
@@ -872,12 +989,12 @@ Function SetCustom
 
 
 	# 2nd group - Key remapping
-	${NSD_CreateGroupBox} 0 35% 100% 31% $(str_msg_keymap_title)
+	${NSD_CreateGroupBox} 0u 48u 296u 44u $(str_msg_keymap_title)
 	Pop $3
 
-	${NSD_CreateLabel} 5% 45% 90% 8% $(str_msg_keymap_desc)
+	${NSD_CreateLabel} 16u 62u 269u 10u $(str_msg_keymap_desc)
 	Pop $3
-	${NSD_CreateDropList} 38% 54% 55% 8% ""
+	${NSD_CreateDropList} 42u 74u 236u 13u ""
 	Pop $vim_nsd_keymap
 	${NSD_CB_AddString} $vim_nsd_keymap $(str_msg_keymap_default)
 	${NSD_CB_AddString} $vim_nsd_keymap $(str_msg_keymap_windows)
@@ -891,12 +1008,12 @@ Function SetCustom
 
 
 	# 3rd group - Mouse behavior
-	${NSD_CreateGroupBox} 0 69% 100% 31% $(str_msg_mouse_title)
+	${NSD_CreateGroupBox} 0u 95u 296u 44u $(str_msg_mouse_title)
 	Pop $3
 
-	${NSD_CreateLabel} 5% 79% 90% 8% $(str_msg_mouse_desc)
+	${NSD_CreateLabel} 16u 108u 269u 10u $(str_msg_mouse_desc)
 	Pop $3
-	${NSD_CreateDropList} 23% 87% 70% 8% ""
+	${NSD_CreateDropList} 42u 121u 237u 13u ""
 	Pop $vim_nsd_mouse
 	${NSD_CB_AddString} $vim_nsd_mouse $(str_msg_mouse_default)
 	${NSD_CB_AddString} $vim_nsd_mouse $(str_msg_mouse_windows)
@@ -963,7 +1080,7 @@ FunctionEnd
     !insertmacro MUI_DESCRIPTION_TEXT ${id_group_plugin}        $(str_desc_plugin)
     !insertmacro MUI_DESCRIPTION_TEXT ${id_section_pluginhome}  $(str_desc_plugin_home)
     !insertmacro MUI_DESCRIPTION_TEXT ${id_section_pluginvim}   $(str_desc_plugin_vim)
-!ifdef HAVE_NLS
+!if ${HAVE_NLS}
     !insertmacro MUI_DESCRIPTION_TEXT ${id_section_nls}         $(str_desc_nls)
 !endif
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
@@ -973,7 +1090,7 @@ FunctionEnd
 # Uninstaller Functions and Sections
 
 Function un.onInit
-!ifdef HAVE_MULTI_LANG
+!if ${HAVE_MULTI_LANG}
   # Get the language from the registry.
   !insertmacro MUI_UNGETLANGUAGE
 !endif
