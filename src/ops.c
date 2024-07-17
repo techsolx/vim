@@ -231,7 +231,10 @@ shift_line(
 {
     vimlong_T	count;
     int		i, j;
-    int		sw_val = trim_to_int(get_sw_value_indent(curbuf));
+    int		sw_val = trim_to_int(get_sw_value_indent(curbuf, left));
+
+    if (sw_val == 0)
+	sw_val = 1;		// shouldn't happen, just in case
 
     count = get_indent();	// get current indent
 
@@ -283,7 +286,7 @@ shift_block(oparg_T *oap, int amount)
     char_u		*newp, *oldp;
     size_t		newlen, oldlen;
     int			oldcol = curwin->w_cursor.col;
-    int			sw_val = (int)get_sw_value_indent(curbuf);
+    int			sw_val = (int)get_sw_value_indent(curbuf, left);
     int			ts_val = (int)curbuf->b_p_ts;
     struct block_def	bd;
     int			incr;
@@ -580,7 +583,7 @@ block_insert(
 
 	// copy the new text
 	mch_memmove(newp + startcol, s, slen);
-	offset += slen;
+	offset += (int)slen;
 
 	if (spaces > 0 && !bdp->is_short)
 	{
@@ -607,7 +610,7 @@ block_insert(
 
 	if (b_insert)
 	    // correct any text properties
-	    inserted_bytes(lnum, startcol, slen);
+	    inserted_bytes(lnum, startcol, (int)slen);
 
 	if (lnum == oap->end.lnum)
 	{
@@ -673,6 +676,7 @@ op_delete(oparg_T *oap)
 	    && !oap->block_mode
 	    && oap->line_count > 1
 	    && oap->motion_force == NUL
+	    && (vim_strchr(p_cpo, CPO_WORD) != NULL)
 	    && oap->op_type == OP_DELETE)
     {
 	ptr = ml_get(oap->end.lnum) + oap->end.col;
@@ -1258,8 +1262,8 @@ op_replace(oparg_T *oap, int c)
 		       replace_character(c);
 		    else
 			PBYTE(curwin->w_cursor, c);
-		   if (inc(&curwin->w_cursor) == -1)
-		       break;
+		    if (inc(&curwin->w_cursor) == -1)
+			break;
 		}
 	    }
 
@@ -1608,7 +1612,7 @@ op_insert(oparg_T *oap, long count1)
 
     if (oap->block_mode)
     {
-	size_t			ins_len;
+	int			ins_len;
 	char_u			*firstline, *ins_text;
 	struct block_def	bd2;
 	int			did_indent = FALSE;
@@ -1722,7 +1726,7 @@ op_insert(oparg_T *oap, long count1)
 	    add = len;  // short line, point to the NUL
 	firstline += add;
 	len -= add;
-	if (pre_textlen >= 0 && (ins_len = len - pre_textlen - offset) > 0)
+	if (pre_textlen >= 0 && (ins_len = (int)len - pre_textlen - offset) > 0)
 	{
 	    ins_text = vim_strnsave(firstline, ins_len);
 	    if (ins_text != NULL)
@@ -1811,7 +1815,7 @@ op_change(oparg_T *oap)
      */
     if (oap->block_mode && oap->start.lnum != oap->end.lnum && !got_int)
     {
-	size_t	ins_len;
+	int	ins_len;
 
 	// Auto-indenting may have changed the indent.  If the cursor was past
 	// the indent, exclude that indent change from the inserted text.
@@ -1824,7 +1828,7 @@ op_change(oparg_T *oap)
 	    bd.textcol += new_indent - pre_indent;
 	}
 
-	ins_len = ml_get_len(oap->start.lnum) - pre_textlen;
+	ins_len = (int)ml_get_len(oap->start.lnum) - pre_textlen;
 	if (ins_len > 0)
 	{
 	    // Subsequent calls to ml_get() flush the firstline data - take a
@@ -1866,7 +1870,7 @@ op_change(oparg_T *oap)
 			// Shift the properties for linenr as edit() would do.
 			if (curbuf->b_has_textprop)
 			    adjust_prop_columns(linenr, bd.textcol,
-						     vpos.coladd + ins_len, 0);
+						     vpos.coladd + (int)ins_len, 0);
 #endif
 		    }
 		}
@@ -2444,13 +2448,14 @@ charwise_block_prep(
     int			inclusive)
 {
     colnr_T startcol = 0, endcol = MAXCOL;
-    int	    is_oneChar = FALSE;
     colnr_T cs, ce;
     char_u *p;
 
     p = ml_get(lnum);
     bdp->startspaces = 0;
     bdp->endspaces = 0;
+    bdp->is_oneChar = FALSE;
+    bdp->start_char_vcols = 0;
 
     if (lnum == start.lnum)
     {
@@ -2462,8 +2467,8 @@ charwise_block_prep(
 	    {
 		// Part of a tab selected -- but don't
 		// double-count it.
-		bdp->startspaces = (ce - cs + 1)
-		    - start.coladd;
+		bdp->start_char_vcols = ce - cs + 1;
+		bdp->startspaces = bdp->start_char_vcols - start.coladd;
 		if (bdp->startspaces < 0)
 		    bdp->startspaces = 0;
 		startcol++;
@@ -2483,19 +2488,16 @@ charwise_block_prep(
 			// of multi-byte char.
 			&& (*mb_head_off)(p, p + endcol) == 0))
 	    {
-		if (start.lnum == end.lnum
-			&& start.col == end.col)
+		if (start.lnum == end.lnum && start.col == end.col)
 		{
 		    // Special case: inside a single char
-		    is_oneChar = TRUE;
-		    bdp->startspaces = end.coladd
-			- start.coladd + inclusive;
+		    bdp->is_oneChar = TRUE;
+		    bdp->startspaces = end.coladd - start.coladd + inclusive;
 		    endcol = startcol;
 		}
 		else
 		{
-		    bdp->endspaces = end.coladd
-			+ inclusive;
+		    bdp->endspaces = end.coladd + inclusive;
 		    endcol -= inclusive;
 		}
 	    }
@@ -2503,10 +2505,11 @@ charwise_block_prep(
     }
     if (endcol == MAXCOL)
 	endcol = ml_get_len(lnum);
-    if (startcol > endcol || is_oneChar)
+    if (startcol > endcol || bdp->is_oneChar)
 	bdp->textlen = 0;
     else
 	bdp->textlen = endcol - startcol + inclusive;
+    bdp->textcol = startcol;
     bdp->textstart = p + startcol;
 }
 
@@ -2524,11 +2527,11 @@ op_addsub(
     int			change_cnt = 0;
     linenr_T		amount = Prenum1;
 
-   // do_addsub() might trigger re-evaluation of 'foldexpr' halfway, when the
-   // buffer is not completely updated yet. Postpone updating folds until before
-   // the call to changed_lines().
+    // do_addsub() might trigger re-evaluation of 'foldexpr' halfway, when the
+    // buffer is not completely updated yet. Postpone updating folds until before
+    // the call to changed_lines().
 #ifdef FEAT_FOLDING
-   disable_fold_update++;
+    disable_fold_update++;
 #endif
 
     if (!VIsual_active)
@@ -2671,6 +2674,8 @@ do_addsub(
     int		do_bin;
     int		do_alpha;
     int		do_unsigned;
+    int		do_blank;
+    int		blank_unsigned = FALSE;	// blank: treat as unsigned?
     int		firstdigit;
     int		subtract;
     int		negative = FALSE;
@@ -2688,6 +2693,7 @@ do_addsub(
     do_bin = (vim_strchr(curbuf->b_p_nf, 'b') != NULL);	// "Bin"
     do_alpha = (vim_strchr(curbuf->b_p_nf, 'p') != NULL);	// "alPha"
     do_unsigned = (vim_strchr(curbuf->b_p_nf, 'u') != NULL);	// "Unsigned"
+    do_blank = (vim_strchr(curbuf->b_p_nf, 'k') != NULL);	// "blanK"
 
     if (virtual_active())
     {
@@ -2811,8 +2817,13 @@ do_addsub(
 		&& (!has_mbyte || !(*mb_head_off)(ptr, ptr + col - 1))
 		&& !do_unsigned)
 	{
-	    negative = TRUE;
-	    was_positive = FALSE;
+	    if (do_blank && col >= 2 && !VIM_ISWHITE(ptr[col - 2]))
+		blank_unsigned = TRUE;
+	    else
+	    {
+		negative = TRUE;
+		was_positive = FALSE;
+	    }
 	}
     }
 
@@ -2873,10 +2884,16 @@ do_addsub(
 		&& !visual
 		&& !do_unsigned)
 	{
-	    // negative number
-	    --col;
-	    negative = TRUE;
+	    if (do_blank && col >= 2 && !VIM_ISWHITE(ptr[col - 2]))
+		blank_unsigned = TRUE;
+	    else
+	    {
+		// negative number
+		--col;
+		negative = TRUE;
+	    }
 	}
+
 	// get the number value (unsigned)
 	if (visual && VIsual_mode != 'V')
 	    maxlen = (curbuf->b_visual.vi_curswant == MAXCOL
@@ -2936,7 +2953,7 @@ do_addsub(
 		negative = FALSE;
 	}
 
-	if (do_unsigned && negative)
+	if ((do_unsigned || blank_unsigned) && negative)
 	{
 	    if (subtract)
 		// sticking at zero.

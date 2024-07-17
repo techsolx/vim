@@ -960,6 +960,8 @@ def Test_execute()
   assert_equal("\nhello", res)
   res = execute(["echo 'here'", "echo 'there'"])
   assert_equal("\nhere\nthere", res)
+  res = execute("echo 'hi'\n# foo")
+  assert_equal("\nhi", res)
 
   v9.CheckSourceDefAndScriptFailure(['execute(123)'], ['E1013: Argument 1: type mismatch, expected string but got number', 'E1222: String or List required for argument 1'])
   v9.CheckSourceDefFailure(['execute([123])'], 'E1013: Argument 1: type mismatch, expected list<string> but got list<number>')
@@ -1967,6 +1969,17 @@ def Test_getreginfo()
   getreginfo('').regcontents->assert_equal(['D1E2F3'])
 enddef
 
+def Test_getregionpos()
+  var lines =<< trim END
+    cursor(1, 1)
+    var pos = getregionpos(getpos('.'), getpos('$'))
+    for p in pos
+      assert_equal(bufnr('%'), p[0][0])
+    endfor
+  END
+  v9.CheckSourceDefSuccess(lines)
+enddef
+
 def Test_getregtype()
   var lines = ['aaa', 'bbb', 'ccc']
   setreg('a', lines)
@@ -2195,6 +2208,7 @@ def Test_indexof()
   indexof(l, (i, v) => v.color == 'blue')->assert_equal(1)
   indexof(l, (i, v) => v.color == 'blue', {startidx: 1})->assert_equal(1)
   indexof(l, (i, v) => v.color == 'blue', {startidx: 2})->assert_equal(3)
+  indexof(l, "")->assert_equal(-1)
   var b = 0zdeadbeef
   indexof(b, "v:val == 0xef")->assert_equal(3)
 
@@ -3147,6 +3161,11 @@ enddef
 def Test_popup_settext()
   v9.CheckSourceDefAndScriptFailure(['popup_settext("x", [])'], ['E1013: Argument 1: type mismatch, expected number but got string', 'E1210: Number required for argument 1'])
   v9.CheckSourceDefAndScriptFailure(['popup_settext(1, 2)'], ['E1013: Argument 2: type mismatch, expected string but got number', 'E1222: String or List required for argument 2'])
+enddef
+
+def Test_popup_setbuf()
+  v9.CheckSourceDefAndScriptFailure(['popup_setbuf([], "abc")'], ['E1013: Argument 1: type mismatch, expected number but got list<any>', 'E1210: Number required for argument 1'])
+  v9.CheckSourceDefAndScriptFailure(['popup_setbuf(1, [])'], ['E1013: Argument 2: type mismatch, expected string but got list<any>', 'E1220: String or Number required for argument 2'])
 enddef
 
 def Test_popup_show()
@@ -4554,6 +4573,7 @@ enddef
 def Test_term_getjob()
   CheckRunVimInTerminal
   v9.CheckSourceDefAndScriptFailure(['term_getjob(0z10)'], ['E1013: Argument 1: type mismatch, expected string but got blob', 'E1220: String or Number required for argument 1'])
+  v9.CheckSourceDefAndScriptSuccess(['assert_true(term_getjob(0) == null_job)'])
 enddef
 
 def Test_term_getline()
@@ -4783,8 +4803,6 @@ def Test_typename()
   if has('channel')
     assert_equal('channel', test_null_channel()->typename())
   endif
-  assert_equal('class<Unknown>', typename(null_class))
-  assert_equal('object<Unknown>', typename(null_object))
   var l: list<func(list<number>): number> = [function('min')]
   assert_equal('list<func(list<number>): number>', typename(l))
 enddef
@@ -5183,10 +5201,26 @@ enddef
 
 def Test_getregion()
   assert_equal(['x'], getregion(getpos('.'), getpos('.'))->map((_, _) => 'x'))
+  assert_equal(['x'], getregionpos(getpos('.'), getpos('.'))->map((_, _) => 'x'))
 
-  v9.CheckSourceDefAndScriptFailure(['getregion(10, getpos("."))'], ['E1013: Argument 1: type mismatch, expected list<any> but got number', 'E1211: List required for argument 1'])
-  assert_equal([''], getregion(getpos('.'), getpos('.')))
+  v9.CheckSourceDefAndScriptFailure(
+      ['getregion(10, getpos("."))'],
+      ['E1013: Argument 1: type mismatch, expected list<any> but got number', 'E1211: List required for argument 1']
+  )
+  v9.CheckSourceDefAndScriptFailure(
+      ['getregionpos(10, getpos("."))'],
+      ['E1013: Argument 1: type mismatch, expected list<any> but got number', 'E1211: List required for argument 1']
+  )
+  assert_equal(
+      [''],
+      getregion(getpos('.'), getpos('.'))
+  )
+  assert_equal(
+      [[[bufnr('%'), 1, 0, 0], [bufnr('%'), 1, 0, 0]]],
+      getregionpos(getpos('.'), getpos('.'))
+  )
   v9.CheckSourceDefExecFailure(['getregion(getpos("a"), getpos("."))'], 'E1209:')
+  v9.CheckSourceDefExecFailure(['getregionpos(getpos("a"), getpos("."))'], 'E1209:')
 enddef
 
 " vim: ts=8 sw=2 sts=2 expandtab tw=80 fdm=marker

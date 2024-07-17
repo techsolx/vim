@@ -1460,8 +1460,13 @@ handle_did_throw(void)
     current_exception->throw_name = NULL;
 
     discard_current_exception();	// uses IObuff if 'verbose'
-    suppress_errthrow = TRUE;
-    force_abort = TRUE;
+
+    // If "silent!" is active the uncaught exception is not fatal.
+    if (emsg_silent == 0)
+    {
+	suppress_errthrow = TRUE;
+	force_abort = TRUE;
+    }
 
     if (messages != NULL)
     {
@@ -2336,12 +2341,7 @@ do_one_cmd(
     {
 	for (p = ea.arg; *p; ++p)
 	{
-	    // Remove one backslash before a newline, so that it's possible to
-	    // pass a newline to the shell and also a newline that is preceded
-	    // with a backslash.  This makes it impossible to end a shell
-	    // command in a backslash, but that doesn't appear useful.
-	    // Halving the number of backslashes is incompatible with previous
-	    // versions.
+	    // Remove one backslash before a newline
 	    if (*p == '\\' && p[1] == '\n')
 		STRMOVE(p, p + 1);
 	    else if (*p == '\n' && !(ea.argt & EX_EXPR_ARG))
@@ -2722,6 +2722,12 @@ ex_errmsg(char *msg, char_u *arg)
 }
 
 /*
+ * The "+" string used in place of an empty command in Ex mode.
+ * This string is used in pointer comparison.
+ */
+static char exmode_plus[] = "+";
+
+/*
  * Handle a range without a command.
  * Returns an error message on failure.
  */
@@ -2730,7 +2736,8 @@ ex_range_without_command(exarg_T *eap)
 {
     char *errormsg = NULL;
 
-    if ((*eap->cmd == '|' || (exmode_active && eap->line1 != eap->line2))
+    if ((*eap->cmd == '|' ||
+		(exmode_active && eap->cmd != (char_u *)exmode_plus + 1))
 #ifdef FEAT_EVAL
 	    && !in_vim9script()
 #endif
@@ -2860,9 +2867,8 @@ parse_command_modifiers(
     {
 	// The automatically inserted Visual area range is skipped, so that
 	// typing ":cmdmod cmd" in Visual mode works without having to move the
-	// range to after the modififiers. The command will be
-	// "'<,'>cmdmod cmd", parse "cmdmod cmd" and then put back "'<,'>"
-	// before "cmd" below.
+	// range to after the modifiers. The command will be "'<,'>cmdmod cmd",
+	// parse "cmdmod cmd" and then put back "'<,'>" before "cmd" below.
 	eap->cmd += 5;
 	cmd_start = eap->cmd;
 	has_visual_range = TRUE;
@@ -3213,7 +3219,7 @@ parse_command_modifiers(
 		eap->cmd = orig_cmd;
     }
     else if (use_plus_cmd)
-	eap->cmd = (char_u *)"+";
+	eap->cmd = (char_u *)exmode_plus;
 
     return OK;
 }
@@ -4567,7 +4573,7 @@ get_address(
 			curwin->w_cursor.col = 0;
 		    searchcmdlen = 0;
 		    flags = silent ? 0 : SEARCH_HIS | SEARCH_MSG;
-		    if (!do_search(NULL, c, c, cmd, 1L, flags, NULL))
+		    if (!do_search(NULL, c, c, cmd, STRLEN(cmd), 1L, flags, NULL))
 		    {
 			curwin->w_cursor = pos;
 			cmd = NULL;
@@ -4621,7 +4627,7 @@ get_address(
 		    pos.coladd = 0;
 		    if (searchit(curwin, curbuf, &pos, NULL,
 				*cmd == '?' ? BACKWARD : FORWARD,
-				(char_u *)"", 1L, SEARCH_MSG, i, NULL) != FAIL)
+				(char_u *)"", 0, 1L, SEARCH_MSG, i, NULL) != FAIL)
 			lnum = pos.lnum;
 		    else
 		    {
@@ -4698,6 +4704,7 @@ get_address(
 		if (n == MAXLNUM)
 		{
 		    emsg(_(e_line_number_out_of_range));
+		    cmd = NULL;
 		    goto error;
 		}
 	    }
@@ -4728,6 +4735,7 @@ get_address(
 		    if (lnum >= 0 && n >= LONG_MAX - lnum)
 		    {
 			emsg(_(e_line_number_out_of_range));
+			cmd = NULL;
 			goto error;
 		    }
 		    lnum += n;
@@ -5077,7 +5085,7 @@ expand_filename(
 {
     int		has_wildcards;	// need to expand wildcards
     char_u	*repl;
-    int		srclen;
+    size_t	srclen;
     char_u	*p;
     int		n;
     int		escaped;
@@ -5201,7 +5209,7 @@ expand_filename(
 	    }
 	}
 
-	p = repl_cmdline(eap, p, (size_t)srclen, repl, cmdlinep);
+	p = repl_cmdline(eap, p, srclen, repl, cmdlinep);
 	vim_free(repl);
 	if (p == NULL)
 	    return FAIL;
@@ -5401,7 +5409,11 @@ separate_nextcmd(exarg_T *eap, int keep_backslash)
 		    && in_vim9script()
 		    && !(eap->argt & EX_NOTRLCOM)
 		    && p > eap->cmd && VIM_ISWHITE(p[-1]))
-		|| *p == '|' || *p == '\n')
+		|| (*p == '|'
+		    && eap->cmdidx != CMD_append
+		    && eap->cmdidx != CMD_change
+		    && eap->cmdidx != CMD_insert)
+		|| *p == '\n')
 	{
 	    /*
 	     * We remove the '\' before the '|', unless EX_CTRLV is used
@@ -7261,7 +7273,7 @@ ex_resize(exarg_T *eap)
 ex_find(exarg_T *eap)
 {
     if (!check_can_set_curbuf_forceit(eap->forceit))
-        return;
+	return;
 
     char_u	*fname;
     int		count;
@@ -7353,7 +7365,7 @@ ex_edit(exarg_T *eap)
 	    // All other commands must obey 'winfixbuf' / ! rules
 	    && (is_other_file(0, ffname) && !check_can_set_curbuf_forceit(eap->forceit))
     )
-        return;
+	return;
 
     do_exedit(eap, NULL);
 }
@@ -9363,7 +9375,7 @@ enum {
  * the variable.  Otherwise return -1 and "*usedlen" is unchanged.
  */
     int
-find_cmdline_var(char_u *src, int *usedlen)
+find_cmdline_var(char_u *src, size_t *usedlen)
 {
     // must be sorted by the 'value' field because it is used by bsearch()!
     static keyvalue_T spec_str_tab[] = {
@@ -9444,7 +9456,7 @@ find_cmdline_var(char_u *src, int *usedlen)
 eval_vars(
     char_u	*src,		// pointer into commandline
     char_u	*srcstart,	// beginning of valid memory for src
-    int		*usedlen,	// characters after src that are used
+    size_t	*usedlen,	// characters after src that are used
     linenr_T	*lnump,		// line number for :e command, or NULL
     char	**errormsg,	// pointer to error message
     int		*escaped,	// return value has escaped white space (can
@@ -9514,7 +9526,7 @@ eval_vars(
      */
     else
     {
-	int off = 0;
+	size_t off = 0;
 
 	switch (spec_idx)
 	{
@@ -9781,7 +9793,7 @@ expand_sfile(char_u *arg)
     size_t	len;
     char_u	*repl;
     size_t	repllen;
-    int		srclen;
+    size_t	srclen;
     char_u	*p;
 
     resultlen = STRLEN(arg);

@@ -3,7 +3,7 @@ vim9script
 # Vim functions for file type detection
 #
 # Maintainer:		The Vim Project <https://github.com/vim/vim>
-# Last Change:		2024 Feb 18
+# Last Change:		2024 May 23
 # Former Maintainer:	Bram Moolenaar <Bram@vim.org>
 
 # These functions are moved here from runtime/filetype.vim to make startup
@@ -376,15 +376,57 @@ export def FTfs()
   endif
 enddef
 
-# Distinguish between HTML, XHTML and Django
+# Recursively search for Hare source files in a directory and any
+# subdirectories, up to a given depth.
+def IsHareModule(dir: string, depth: number): bool
+  if depth <= 0
+    return !empty(glob(dir .. '/*.ha'))
+  endif
+
+  return reduce(sort(glob(dir .. '/*', true, true),
+    (a, b) => isdirectory(a) - isdirectory(b)),
+    (acc, n) => acc
+      || n =~ '\.ha$'
+      || isdirectory(n)
+      && IsHareModule(n, depth - 1),
+    false)
+enddef
+
+# Determine if a README file exists within a Hare module and should be given the
+# Haredoc filetype.
+export def FTharedoc()
+  if exists('g:filetype_haredoc')
+    if IsHareModule('<afile>:h', get(g:, 'haredoc_search_depth', 1))
+      setf haredoc
+    endif
+  endif
+enddef
+
+# Distinguish between HTML, XHTML, Django and Angular
 export def FThtml()
   var n = 1
-  while n < 10 && n <= line("$")
+
+  # Test if the filename follows the Angular component template convention
+  # Disabled for the reasons mentioned here: #13594
+  # if expand('%:t') =~ '^.*\.component\.html$'
+  #   setf htmlangular
+  #   return
+  # endif
+
+  while n < 40 && n <= line("$")
+    # Check for Angular
+    if getline(n) =~ '@\(if\|for\|defer\|switch\)\|\*\(ngIf\|ngFor\|ngSwitch\|ngTemplateOutlet\)\|ng-template\|ng-content\|{{.*}}'
+      setf htmlangular
+      return
+    endif
+
+    # Check for XHTML
     if getline(n) =~ '\<DTD\s\+XHTML\s'
       setf xhtml
       return
     endif
-    if getline(n) =~ '{%\s*\(extends\|block\|load\)\>\|{#\s\+'
+    # Check for Django
+    if getline(n) =~ '{%\s*\(autoescape\|block\|comment\|csrf_token\|cycle\|debug\|extends\|filter\|firstof\|for\|if\|ifchanged\|include\|load\|lorem\|now\|query_string\|regroup\|resetcycle\|spaceless\|templatetag\|url\|verbatim\|widthratio\|with\)\>\|{#\s\+'
       setf htmldjango
       return
     endif
@@ -406,20 +448,24 @@ export def FTidl()
   setf idl
 enddef
 
-# Distinguish between "default", Prolog and Cproto prototype file.
+# Distinguish between "default", Prolog, zsh module's C and Cproto prototype file.
 export def ProtoCheck(default: string)
+  # zsh modules use '#include "*.pro"'
+  # https://github.com/zsh-users/zsh/blob/63f086d167960a27ecdbcb762179e2c2bf8a29f5/Src/Modules/example.c#L31
+  if getline(1) =~ '/* Generated automatically */'
+    setf c
   # Cproto files have a comment in the first line and a function prototype in
   # the second line, it always ends in ";".  Indent files may also have
   # comments, thus we can't match comments to see the difference.
   # IDL files can have a single ';' in the second line, require at least one
   # chacter before the ';'.
-  if getline(2) =~ '.;$'
+  elseif getline(2) =~ '.;$'
     setf cpp
   else
     # recognize Prolog by specific text in the first non-empty line
     # require a blank after the '%' because Perl uses "%list" and "%translate"
     var lnum = getline(nextnonblank(1))
-    if lnum =~ '\<prolog\>' || lnum =~ '^\s*\(%\+\(\s\|$\)\|/\*\)' || lnum =~ ':-'
+    if lnum =~ '\<prolog\>' || lnum =~ '^\(:-\|%\|\/\*\)\|\.$'
       setf prolog
     else
       exe 'setf ' .. default
@@ -1233,6 +1279,56 @@ export def FTtyp()
 
   # Otherwise, affect the typst filetype
   setf typst
+enddef
+
+# Detect Microsoft Developer Studio Project files (Makefile) or Faust DSP
+# files.
+export def FTdsp()
+  if exists("g:filetype_dsp")
+    exe "setf " .. g:filetype_dsp
+    return
+  endif
+
+  # Test the filename
+  if expand('%:t') =~ '^[mM]akefile.*$'
+    setf make
+    return
+  endif
+
+  # Test the file contents
+  for line in getline(1, 200)
+    # Chech for comment style
+    if line =~ '^#.*'
+      setf make
+      return
+    endif
+
+    # Check for common lines
+    if line =~ '^.*Microsoft Developer Studio Project File.*$'
+      setf make
+      return
+    endif
+
+    if line =~ '^!MESSAGE This is not a valid makefile\..+$'
+      setf make
+      return
+    endif
+
+    # Check for keywords
+    if line =~ '^!(IF,ELSEIF,ENDIF).*$'
+      setf make
+      return
+    endif
+
+    # Check for common assignments
+    if line =~ '^SOURCE=.*$'
+      setf make
+      return
+    endif
+  endfor
+
+  # Otherwise, assume we have a Faust file
+  setf faust
 enddef
 
 # Set the filetype of a *.v file to Verilog, V or Cog based on the first 200

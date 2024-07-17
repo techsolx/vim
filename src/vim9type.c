@@ -934,6 +934,7 @@ type_mismatch_where(type_T *expected, type_T *actual, where_T where)
 		semsg(_(e_argument_nr_type_mismatch_expected_str_but_got_str_in_str),
 			where.wt_index, typename1, typename2, where.wt_func_name);
 	    break;
+	case WT_CAST:
 	case WT_UNKNOWN:
 	    if (where.wt_func_name == NULL)
 		semsg(_(e_type_mismatch_expected_str_but_got_str),
@@ -1090,7 +1091,15 @@ check_type_maybe(
 		    ret = FAIL;
 	    }
 	    else if (!class_instance_of(actual->tt_class, expected->tt_class))
-		ret = FAIL;
+	    {
+		// Check if this is an up-cast, if so we'll have to check the type at
+		// runtime.
+		if (where.wt_kind == WT_CAST &&
+			class_instance_of(expected->tt_class, actual->tt_class))
+		    ret = MAYBE;
+		else
+		    ret = FAIL;
+	    }
 	}
 
 	if (ret == FAIL && give_msg)
@@ -1466,7 +1475,14 @@ parse_type_user_defined(
     }
 
     if (give_error && (did_emsg == did_emsg_before))
+    {
+	char_u	*p = skip_type(*arg, FALSE);
+	char	cc = *p;
+
+	*p = NUL;
 	semsg(_(e_type_not_recognized_str), *arg);
+	*p = cc;
+    }
 
     return NULL;
 }
@@ -2091,10 +2107,12 @@ check_typval_is_value(typval_T *tv)
 	case VAR_CLASS:
 	    {
 		class_T *cl = tv->vval.v_class;
-		if (IS_ENUM(cl))
-		    semsg(_(e_using_enum_as_value_str), cl->class_name);
+		char_u *class_name = (cl == NULL) ? (char_u *)""
+							: cl->class_name;
+		if (cl != NULL && IS_ENUM(cl))
+		    semsg(_(e_using_enum_as_value_str), class_name);
 		else
-		    semsg(_(e_using_class_as_value_str), cl->class_name);
+		    semsg(_(e_using_class_as_value_str), class_name);
 	    }
 	    return FAIL;
 
