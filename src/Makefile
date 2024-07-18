@@ -388,7 +388,7 @@ CONF_OPT_GUI = --disable-gui
 # Set PATH environment variable to find lua or luajit executable.
 # This requires at least "normal" features, "tiny" doesn't work.
 CONF_OPT_LUA = --enable-luainterp
-#CONF_OPT_LUA = --enable-luainterp=dynamic
+CONF_OPT_LUA = --enable-luainterp=dynamic
 #CONF_OPT_LUA = --enable-luainterp --with-luajit
 #CONF_OPT_LUA = --enable-luainterp=dynamic --with-luajit
 # Lua installation dir (when not set uses $LUA_PREFIX or defaults to /usr)
@@ -438,16 +438,16 @@ CONF_OPT_PERL = --enable-perlinterp
 #CONF_OPT_PYTHON = --enable-pythoninterp
 #CONF_OPT_PYTHON = --enable-pythoninterp --with-python-command=python2.7
 #CONF_OPT_PYTHON = --enable-pythoninterp=dynamic
-#CONF_OPT_PYTHON3 = --enable-python3interp
-#CONF_OPT_PYTHON3 = --enable-python3interp --with-python3-command=python
-CONF_OPT_PYTHON3 = --enable-python3interp=dynamic
+CONF_OPT_PYTHON3 = --enable-python3interp
+#CONF_OPT_PYTHON3 = --enable-python3interp --with-python3-command=python3
+#CONF_OPT_PYTHON3 = --enable-python3interp=dynamic
 
 # RUBY
 # Uncomment this when you want to include the Ruby interface.
 # First one for static linking, second one for loading when used.
 # Debian package is "ruby-dev".
 # This requires at least "normal" features, "tiny" doesn't work.
-#CONF_OPT_RUBY = --enable-rubyinterp
+CONF_OPT_RUBY = --enable-rubyinterp
 #CONF_OPT_RUBY = --enable-rubyinterp=dynamic
 #CONF_OPT_RUBY = --enable-rubyinterp --with-ruby-command=ruby1.9.1
 
@@ -462,7 +462,7 @@ CONF_OPT_TCL = --enable-tclinterp
 
 # CSCOPE
 # Uncomment this when you want to include the Cscope interface.
-#CONF_OPT_CSCOPE = --enable-cscope
+CONF_OPT_CSCOPE = --enable-cscope
 
 # NETBEANS - NetBeans interface. Only works with Motif, GTK, and gnome.
 # Motif version must have XPM libraries (see |netbeans-xpm|).
@@ -486,7 +486,7 @@ CONF_OPT_TERMINAL = --enable-terminal
 
 # When building with "huge" features, right-left and Arabic
 # features are enabled.  Use this to disable them.
-CONF_OPT_MULTIBYTE = --disable-rightleft --disable-arabic
+#CONF_OPT_MULTIBYTE = --disable-rightleft --disable-arabic
 
 # NLS - National Language Support
 # Uncomment this when you do not want to support translated messages, even
