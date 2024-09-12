@@ -2651,6 +2651,8 @@ f_popup_filter_yesno(typval_T *argvars, typval_T *rettv)
 	return;
 
     c = *key;
+    if (c == CAR && need_wait_return)
+	return;
     if (c == K_SPECIAL && key[1] != NUL)
 	c = TO_SPECIAL(key[1], key[2]);
 
@@ -2756,6 +2758,8 @@ popup_hide(win_T *wp)
 
     wp->w_popup_flags |= POPF_HIDDEN;
     // Do not decrement b_nwindows, we still reference the buffer.
+    if (wp->w_winrow + popup_height(wp) >= cmdline_row)
+	clear_cmdline = TRUE;
     redraw_all_later(UPD_NOT_VALID);
     popup_mask_refresh = TRUE;
 }

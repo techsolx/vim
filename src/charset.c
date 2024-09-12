@@ -739,8 +739,8 @@ chartabsize(char_u *p, colnr_T col)
     RET_WIN_BUF_CHARTABSIZE(curwin, curbuf, p, col)
 }
 
-#ifdef FEAT_LINEBREAK
-    static int
+#if defined(FEAT_LINEBREAK) || defined(PROTO)
+    int
 win_chartabsize(win_T *wp, char_u *p, colnr_T col)
 {
     RET_WIN_BUF_CHARTABSIZE(wp, wp->w_buffer, p, col)
@@ -1397,17 +1397,17 @@ win_lbr_chartabsize(
 		else if (max_head_vcol > vcol + head_prev + prev_rem)
 		    head += (max_head_vcol - (vcol + head_prev + prev_rem)
 					     + width2 - 1) / width2 * head_mid;
-#  ifdef FEAT_PROP_POPUP
 		else if (max_head_vcol < 0)
 		{
-		    int off = 0;
+		    int off = mb_added;
+#  ifdef FEAT_PROP_POPUP
 		    if (*s != NUL
 			     && ((State & MODE_NORMAL) || cts->cts_start_incl))
 			off += cts->cts_cur_text_width;
+#  endif
 		    if (off >= prev_rem)
 			head += (1 + (off - prev_rem) / width) * head_mid;
 		}
-#  endif
 	    }
 	}
 
@@ -1677,6 +1677,9 @@ getvcol(
 	ptr = cts.cts_ptr;
     }
     clear_chartabsize_arg(&cts);
+
+    if (*ptr == NUL && pos->col < MAXCOL && pos->col > ptr - line)
+	pos->col = ptr - line;
 
     if (start != NULL)
 	*start = vcol + head;

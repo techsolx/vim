@@ -3451,6 +3451,10 @@ limit_scrollback(term_T *term, garray_T *gap, int update_buffer)
 	    sizeof(sb_line_T) * gap->ga_len);
     if (update_buffer)
 	term->tl_scrollback_scrolled -= todo;
+
+    // make sure cursor is on a valid line
+    if (curbuf == term->tl_buffer)
+	check_cursor();
 }
 
 /*
@@ -3643,7 +3647,7 @@ term_after_channel_closed(term_T *term)
 	if (term->tl_finish == TL_FINISH_CLOSE)
 	{
 	    aco_save_T	aco;
-	    int		do_set_w_closing = term->tl_buffer->b_nwindows == 0;
+	    int		do_set_w_locked = term->tl_buffer->b_nwindows == 0;
 #ifdef FEAT_PROP_POPUP
 	    win_T	*pwin = NULL;
 
@@ -3674,12 +3678,12 @@ term_after_channel_closed(term_T *term)
 	    {
 		// Avoid closing the window if we temporarily use it.
 		if (is_aucmd_win(curwin))
-		    do_set_w_closing = TRUE;
-		if (do_set_w_closing)
-		    curwin->w_closing = TRUE;
+		    do_set_w_locked = TRUE;
+		if (do_set_w_locked)
+		    curwin->w_locked = TRUE;
 		do_bufdel(DOBUF_WIPE, (char_u *)"", 1, fnum, fnum, FALSE);
-		if (do_set_w_closing)
-		    curwin->w_closing = FALSE;
+		if (do_set_w_locked)
+		    curwin->w_locked = FALSE;
 		aucmd_restbuf(&aco);
 	    }
 #ifdef FEAT_PROP_POPUP
@@ -6299,7 +6303,7 @@ f_term_getsize(typval_T *argvars, typval_T *rettv)
  * "term_setsize(buf, rows, cols)" function
  */
     void
-f_term_setsize(typval_T *argvars UNUSED, typval_T *rettv UNUSED)
+f_term_setsize(typval_T *argvars, typval_T *rettv UNUSED)
 {
     buf_T	*buf;
     term_T	*term;

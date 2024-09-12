@@ -225,7 +225,7 @@ def s:GetFilenameChecks(): dict<list<string>>
              'psprint.conf', 'sofficerc', 'any/.config/lxqt/globalkeyshortcuts.conf', 'any/.config/screengrab/screengrab.conf',
              'any/.local/share/flatpak/repo/config', '.notmuch-config'],
     dot: ['file.dot', 'file.gv'],
-    dracula: ['file.drac', 'file.drc', 'filelvs', 'filelpe', 'drac.file', 'lpe', 'lvs', 'some-lpe', 'some-lvs'],
+    dracula: ['file.drac', 'file.drc', 'file.lvs', 'file.lpe', 'drac.file'],
     dtd: ['file.dtd'],
     dtrace: ['/usr/lib/dtrace/io.d'],
     dts: ['file.dts', 'file.dtsi', 'file.dtso', 'file.its', 'file.keymap'],
@@ -295,11 +295,12 @@ def s:GetFilenameChecks(): dict<list<string>>
     gitsendemail: ['.gitsendemail.msg.xxxxxx'],
     gkrellmrc: ['gkrellmrc', 'gkrellmrc_x'],
     gleam: ['file.gleam'],
-    glsl: ['file.glsl'],
+    glsl: ['file.glsl', 'file.vert', 'file.tesc', 'file.tese', 'file.geom', 'file.frag', 'file.comp', 'file.rgen', 'file.rmiss', 'file.rchit', 'file.rahit', 'file.rint', 'file.rcall'],
     gn: ['file.gn', 'file.gni'],
     gnash: ['gnashrc', '.gnashrc', 'gnashpluginrc', '.gnashpluginrc'],
     gnuplot: ['file.gpi', '.gnuplot', 'file.gnuplot', '.gnuplot_history'],
     go: ['file.go'],
+    goaccess: ['goaccess.conf'],
     gomod: ['go.mod'],
     gosum: ['go.sum', 'go.work.sum'],
     gowork: ['go.work'],
@@ -369,7 +370,9 @@ def s:GetFilenameChecks(): dict<list<string>>
     jq: ['file.jq'],
     jovial: ['file.jov', 'file.j73', 'file.jovial'],
     jproperties: ['file.properties', 'file.properties_xx', 'file.properties_xx_xx', 'some.properties_xx_xx_file', 'org.eclipse.xyz.prefs'],
-    json: ['file.json', 'file.jsonp', 'file.json-patch', 'file.geojson', 'file.webmanifest', 'Pipfile.lock', 'file.ipynb', 'file.jupyterlab-settings', '.prettierrc', '.firebaserc', '.stylelintrc', '.lintstagedrc', 'file.slnf', 'file.sublime-project', 'file.sublime-settings', 'file.sublime-workspace', 'file.bd', 'file.bda', 'file.xci', 'flake.lock', 'pack.mcmeta'],
+    json: ['file.json', 'file.jsonp', 'file.json-patch', 'file.geojson', 'file.webmanifest', 'Pipfile.lock', 'file.ipynb', 'file.jupyterlab-settings',
+    '.prettierrc', '.firebaserc', '.stylelintrc', '.lintstagedrc', 'file.slnf', 'file.sublime-project', 'file.sublime-settings', 'file.sublime-workspace',
+    'file.bd', 'file.bda', 'file.xci', 'flake.lock', 'pack.mcmeta', 'deno.lock'],
     json5: ['file.json5'],
     jsonc: ['file.jsonc', '.babelrc', '.eslintrc', '.jsfmtrc', '.jshintrc', '.jscsrc', '.vsconfig', '.hintrc', '.swrc', 'jsconfig.json', 'tsconfig.json', 'tsconfig.test.json', 'tsconfig-test.json', '.luaurc'],
     jsonl: ['file.jsonl'],
@@ -433,7 +436,7 @@ def s:GetFilenameChecks(): dict<list<string>>
     map: ['file.map'],
     maple: ['file.mv', 'file.mpl', 'file.mws'],
     markdown: ['file.markdown', 'file.mdown', 'file.mkd', 'file.mkdn', 'file.mdwn', 'file.md'],
-    mason: ['file.mason', 'file.mhtml', 'file.comp'],
+    mason: ['file.mason', 'file.mhtml'],
     master: ['file.mas', 'file.master'],
     matlab: ['file.m'],
     maxima: ['file.demo', 'file.dmt', 'file.dm1', 'file.dm2', 'file.dm3',
@@ -709,7 +712,7 @@ def s:GetFilenameChecks(): dict<list<string>>
     svg: ['file.svg'],
     svn: ['svn-commitfile.tmp', 'svn-commit-file.tmp', 'svn-commit.tmp'],
     swayconfig: ['/home/user/.sway/config', '/home/user/.config/sway/config', '/etc/sway/config', '/etc/xdg/sway/config'],
-    swift: ['file.swift'],
+    swift: ['file.swift', 'file.swiftinterface'],
     swiftgyb: ['file.swift.gyb'],
     swig: ['file.swg', 'file.swig'],
     sysctl: ['/etc/sysctl.conf', '/etc/sysctl.d/file.conf', 'any/etc/sysctl.conf', 'any/etc/sysctl.d/file.conf'],
@@ -862,6 +865,8 @@ def s:GetFilenameChecks(): dict<list<string>>
     z8a: ['file.z8a'],
     zathurarc: ['zathurarc'],
     zig: ['file.zig', 'build.zig.zon'],
+    ziggy: ['file.ziggy'],
+    ziggy_schema: ['file.ziggy-schema'],
     zimbu: ['file.zu'],
     zimbutempl: ['file.zut'],
     zserio: ['file.zs'],
@@ -1599,6 +1604,38 @@ func Test_html_file()
   call writefile(content, 'Xfile.html', 'D')
   split Xfile.html
   call assert_equal('htmldjango', &filetype)
+  bwipe!
+
+  " Super html layout
+  let content = ['<extend template="base.shtml">',
+        \ '<title id="title" var="$page.title"></title>',
+        \ '<head id="head"></head>',
+        \ '<div id="content">',
+        \ '</div>']
+  call writefile(content, 'Xfile.shtml', 'D')
+  split Xfile.shtml
+  call assert_equal('superhtml', &filetype)
+  bwipe!
+
+  " Super html template
+  let content = ['<!DOCTYPE html>',
+        \ '<html>',
+        \ '  <head id="head">',
+        \ '    <title id="title">',
+        \ '      <super>',
+        \ '      suffix',
+        \ '    </title>',
+        \ '    <super>',
+        \ '  </head>',
+        \ '  <body>',
+        \ '    <div id="content">',
+        \ '      <super>',
+        \ '    </div>',
+        \ '  </body>',
+        \ '</html>']
+  call writefile(content, 'Xfile.shtml', 'D')
+  split Xfile.shtml
+  call assert_equal('superhtml', &filetype)
   bwipe!
 
   " regular HTML
@@ -2601,6 +2638,61 @@ func Test_pro_file()
   call writefile(['rule(test, 1.7).'], 'Xfile.pro', 'D')
   split Xfile.pro
   call assert_equal('prolog', &filetype)
+  bwipe!
+
+  " IDL
+  call writefile(['x = findgen(100)/10'], 'Xfile.pro', 'D')
+  split Xfile.pro
+  call assert_equal('idlang', &filetype)
+
+  filetype off
+endfunc
+
+
+func Test_pl_file()
+  filetype on
+
+  "Prolog
+  call writefile([':-module(test/1,'], 'Xfile.pl', 'D')
+  split Xfile.pl
+  call assert_equal('prolog', &filetype)
+  bwipe!
+
+  call writefile(['% comment'], 'Xfile.pl', 'D')
+  split Xfile.pl
+  call assert_equal('prolog', &filetype)
+  bwipe!
+
+  call writefile(['/* multiline comment'], 'Xfile.pl', 'D')
+  split Xfile.pl
+  call assert_equal('prolog', &filetype)
+  bwipe!
+
+  call writefile(['rule(test, 1.7).'], 'Xfile.pl', 'D')
+  split Xfile.pl
+  call assert_equal('prolog', &filetype)
+  bwipe!
+
+  " Perl
+  call writefile(['%data = (1, 2, 3);'], 'Xfile.pl', 'D')
+  split Xfile.pl
+  call assert_equal('perl', &filetype)
+
+  filetype off
+endfunc
+
+func Test_make_file()
+  filetype on
+
+  " Microsoft Makefile
+  call writefile(['# Makefile for Windows', '!if "$(VIMDLL)" == "yes"'], 'XMakefile.mak', 'D')
+  split XMakefile.mak
+  call assert_equal(1, get(b:, 'make_microsoft', 0))
+  bwipe!
+
+  call writefile(['# get the list of tests', 'include testdir/Make_all.mak'], 'XMakefile.mak', 'D')
+  split XMakefile.mak
+  call assert_equal(0, get(b:, 'make_microsoft', 0))
   bwipe!
 
   filetype off
