@@ -1,5 +1,6 @@
 " Vim :function command
-" VIM_TEST_SETUP let g:vimsyn_folding = "f" | set fdm=syntax
+" VIM_TEST_SETUP let g:vimsyn_folding = "f"
+" VIM_TEST_SETUP setl fdc=2 fdl=999 fdm=syntax
 
 
 " list
@@ -165,12 +166,37 @@ function Foo(
 endfunction
 
 
+" arguments
+
+function Foo(a, b, c)
+  echo a:a a:b a:c
+endfunction
+
+function Foo(...)
+  echo a:000
+  echo a:0
+  echo a:1 a:2 a:3 a:4 a:5 a:6 a:7 a:8 a:9 a:10 a:11 a:12 a:13 a:14 a:15 a:16 a:17 a:18 a:19 a:20
+endfunction
+
+
 " comments
 
 function Foo()
   " Legacy-script comment
   # 42 " comment
   return 42
+endfunction
+
+
+" command modifiers
+
+silent! function Foo()
+endfunction
+
+
+" leading command separator
+
+echo "Foo" | function Foo()
 endfunction
 
 
@@ -219,4 +245,46 @@ endfunction
 
 :function Foo()
 :endfunction
+
+
+" Issue #15671
+" No recognition of :fun or :def bodies commencing with empty lines if
+" g:vimsyn_folding contains "f"
+
+fun FA1()
+
+
+    return
+endfun
+
+fun FA2()
+    return
+endfun
+
+fun FB1() abort
+
+    return
+endfun
+
+fun FB2() abort
+    return
+endfun
+
+fun FC1(_)
+
+    return
+endfun
+
+fun FC2(_)
+    return
+endfun
+
+fun FD1(_) abort
+
+    return
+endfun
+
+fun FD2(_) abort
+    return
+endfun
 

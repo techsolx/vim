@@ -87,6 +87,13 @@
 # endif
 #endif
 
+// C89 does not define SIZE_MAX
+#if defined(__hpux) || defined(VMS)
+# ifndef SIZE_MAX
+#  define SIZE_MAX ((size_t)(-1))
+# endif
+#endif
+
 // user ID of root is usually zero, but not for everybody
 #ifdef __TANDEM
 # ifndef _TANDEM_SOURCE
@@ -844,6 +851,10 @@ extern int (*dyn_libintl_wputenv)(const wchar_t *envstring);
 #define EXPAND_TERMINALOPT	57
 #define EXPAND_KEYMAP		58
 #define EXPAND_DIRS_IN_CDPATH	59
+#define EXPAND_SHELLCMDLINE	60
+#define EXPAND_FINDFUNC		61
+#define EXPAND_HIGHLIGHT_GROUP  62
+#define EXPAND_FILETYPECMD	63
 
 
 // Values for exmode_active (0 is no exmode)
@@ -878,6 +889,7 @@ extern int (*dyn_libintl_wputenv)(const wchar_t *envstring);
 #define WILD_NOERROR		    0x800  // sets EW_NOERROR
 #define WILD_BUFLASTUSED	    0x1000
 #define BUF_DIFF_FILTER		    0x2000
+#define WILD_KEEP_SOLE_ITEM	    0x4000
 
 // Flags for expand_wildcards()
 #define EW_DIR		0x01	// include directory names
@@ -951,6 +963,7 @@ extern int (*dyn_libintl_wputenv)(const wchar_t *envstring);
 # define HL_TRANS_CONT	0x10000 // transparent item without contains arg
 # define HL_CONCEAL	0x20000 // can be concealed
 # define HL_CONCEALENDS	0x40000 // can be concealed
+# define HL_INCLUDED_TOPLEVEL 0x80000 // toplevel item in included syntax, allowed by contains=TOP
 #endif
 
 // Values for 'options' argument in do_search() and searchit()
@@ -1012,9 +1025,10 @@ extern int (*dyn_libintl_wputenv)(const wchar_t *envstring);
 #define KEY_COMPLETE	0x103	// end of completion
 
 // Used for the first argument of do_map()
-#define MAPTYPE_MAP	0
-#define MAPTYPE_UNMAP	1
-#define MAPTYPE_NOREMAP	2
+#define MAPTYPE_MAP		0
+#define MAPTYPE_UNMAP		1
+#define MAPTYPE_NOREMAP		2
+#define MAPTYPE_UNMAP_LHS	3
 
 // Values for "noremap" argument of ins_typebuf().  Also used for
 // map->m_noremap and menu->noremap[].
@@ -1170,12 +1184,13 @@ extern int (*dyn_libintl_wputenv)(const wchar_t *envstring);
 #define INSCHAR_COM_LIST 16	// format comments with list/2nd line indent
 
 // flags for open_line()
-#define OPENLINE_DELSPACES  0x01    // delete spaces after cursor
-#define OPENLINE_DO_COM	    0x02    // format comments
-#define OPENLINE_KEEPTRAIL  0x04    // keep trailing spaces
-#define OPENLINE_MARKFIX    0x08    // fix mark positions
-#define OPENLINE_COM_LIST   0x10    // format comments with list/2nd line indent
-#define OPENLINE_FORMAT	    0x20    // formatting long comment
+#define OPENLINE_DELSPACES	0x01    // delete spaces after cursor
+#define OPENLINE_DO_COM		0x02    // format comments
+#define OPENLINE_KEEPTRAIL	0x04    // keep trailing spaces
+#define OPENLINE_MARKFIX	0x08    // fix mark positions
+#define OPENLINE_COM_LIST	0x10    // format comments with list/2nd line indent
+#define OPENLINE_FORMAT		0x20    // formatting long comment
+#define OPENLINE_FORCE_INDENT	0x40    // use second_line_indent without indent logic
 
 // There are five history tables:
 #define HIST_CMD	0	// colon commands
@@ -1329,11 +1344,12 @@ extern int (*dyn_libintl_wputenv)(const wchar_t *envstring);
 #define SID_WINLAYOUT	(-7)	// changing window size
 
 /*
- * Events for autocommands.
+ * Events for autocommands. Must be kept in sync with "event_tab".
  */
 enum auto_event
 {
     EVENT_BUFADD = 0,		// after adding a buffer to the buffer list
+    EVENT_BUFCREATE,		// UNUSED: BufCreate == BufAdd
     EVENT_BUFDELETE,		// deleting a buffer from the buffer list
     EVENT_BUFENTER,		// after entering a buffer
     EVENT_BUFFILEPOST,		// after renaming a buffer
@@ -1342,6 +1358,7 @@ enum auto_event
     EVENT_BUFLEAVE,		// before leaving a buffer
     EVENT_BUFNEW,		// after creating any buffer
     EVENT_BUFNEWFILE,		// when creating a buffer for a new file
+    EVENT_BUFREAD,		// UNUSED: BufRead == BufReadPost
     EVENT_BUFREADCMD,		// read buffer using command
     EVENT_BUFREADPOST,		// after reading a buffer
     EVENT_BUFREADPRE,		// before reading a buffer
@@ -1349,11 +1366,13 @@ enum auto_event
     EVENT_BUFWINENTER,		// after showing a buffer in a window
     EVENT_BUFWINLEAVE,		// just after buffer removed from window
     EVENT_BUFWIPEOUT,		// just before really deleting a buffer
+    EVENT_BUFWRITE,		// UNUSED: BufWrite == BufWritePost
     EVENT_BUFWRITECMD,		// write buffer using command
     EVENT_BUFWRITEPOST,		// after writing a buffer
     EVENT_BUFWRITEPRE,		// before writing a buffer
     EVENT_CMDLINECHANGED,	// command line was modified
     EVENT_CMDLINEENTER,		// after entering the command line
+    EVENT_CMDLINELEAVEPRE,	// just before leaving the command line
     EVENT_CMDLINELEAVE,		// before leaving the command line
     EVENT_CMDUNDEFINED,		// command undefined
     EVENT_CMDWINENTER,		// after entering the cmdline window
@@ -1379,6 +1398,7 @@ enum auto_event
     EVENT_FILECHANGEDRO,	// before first change to read-only file
     EVENT_FILECHANGEDSHELL,	// after shell command that changed file
     EVENT_FILECHANGEDSHELLPOST,	// after (not) reloading changed file
+    EVENT_FILEENCODING,		// UNUSED: FileEncoding == EncodingChanged
     EVENT_FILEREADCMD,		// read from a file using command
     EVENT_FILEREADPOST,		// after reading a file
     EVENT_FILEREADPRE,		// before reading a file
@@ -1398,8 +1418,8 @@ enum auto_event
     EVENT_INSERTCHANGE,		// when changing Insert/Replace mode
     EVENT_INSERTCHARPRE,	// before inserting a char
     EVENT_INSERTENTER,		// when entering Insert mode
-    EVENT_INSERTLEAVEPRE,	// just before leaving Insert mode
     EVENT_INSERTLEAVE,		// just after leaving Insert mode
+    EVENT_INSERTLEAVEPRE,	// just before leaving Insert mode
     EVENT_KEYINPUTPRE,		// before key input
     EVENT_MENUPOPUP,		// just before popup menu is displayed
     EVENT_MODECHANGED,		// after changing the mode
@@ -1416,14 +1436,15 @@ enum auto_event
     EVENT_SHELLFILTERPOST,	// after ":1,2!cmd", ":w !cmd", ":r !cmd".
     EVENT_SIGUSR1,		// after the SIGUSR1 signal
     EVENT_SOURCECMD,		// sourcing a Vim script using command
-    EVENT_SOURCEPRE,		// before sourcing a Vim script
     EVENT_SOURCEPOST,		// after sourcing a Vim script
+    EVENT_SOURCEPRE,		// before sourcing a Vim script
     EVENT_SPELLFILEMISSING,	// spell file missing
     EVENT_STDINREADPOST,	// after reading from stdin
     EVENT_STDINREADPRE,		// before reading from stdin
     EVENT_SWAPEXISTS,		// found existing swap file
     EVENT_SYNTAX,		// syntax selected
     EVENT_TABCLOSED,		// after closing a tab page
+    EVENT_TABCLOSEDPRE,		// before closing a tab page
     EVENT_TABENTER,		// after entering a tab page
     EVENT_TABLEAVE,		// before leaving a tab page
     EVENT_TABNEW,		// when entering a new tab page
@@ -1443,17 +1464,17 @@ enum auto_event
     EVENT_VIMLEAVE,		// before exiting Vim
     EVENT_VIMLEAVEPRE,		// before exiting Vim and writing .viminfo
     EVENT_VIMRESIZED,		// after Vim window was resized
+    EVENT_VIMRESUME,		// after Vim is resumed
+    EVENT_VIMSUSPEND,		// before Vim is suspended
+    EVENT_WINCLOSED,		// after closing a window
     EVENT_WINENTER,		// after entering a window
     EVENT_WINLEAVE,		// before leaving a window
-    EVENT_WINNEWPRE,		// before creating a new window
     EVENT_WINNEW,		// after creating a new window
-    EVENT_WINCLOSED,		// after closing a window
-    EVENT_VIMSUSPEND,		// before Vim is suspended
-    EVENT_VIMRESUME,		// after Vim is resumed
+    EVENT_WINNEWPRE,		// before creating a new window
     EVENT_WINRESIZED,		// after a window was resized
     EVENT_WINSCROLLED,		// after a window was scrolled or resized
 
-    NUM_EVENTS			// MUST be the last one
+    NUM_EVENTS,			// MUST be the last one
 };
 
 typedef enum auto_event event_T;
@@ -1498,7 +1519,8 @@ typedef enum
     , HLF_ADD	    // Added diff line
     , HLF_CHD	    // Changed diff line
     , HLF_DED	    // Deleted diff line
-    , HLF_TXD	    // Text Changed in diff line
+    , HLF_TXD	    // Text Changed in changed diff line
+    , HLF_TXA	    // Text Added in changed diff line
     , HLF_CONCEAL   // Concealed text
     , HLF_SC	    // Sign column
     , HLF_SPB	    // SpellBad
@@ -1532,7 +1554,7 @@ typedef enum
 // When changing this also adjust the default for 'highlight'.
 #define HL_FLAGS {'8', '~', '@', 'd', 'e', 'h', 'i', 'l', 'y', 'm', 'M', \
 		  'n', 'a', 'b', 'N', 'G', 'O', 'r', 's', 'S', 'c', 't', 'v', 'V', \
-		  'w', 'W', 'f', 'F', 'A', 'C', 'D', 'T', '-', '>', \
+		  'w', 'W', 'f', 'F', 'A', 'C', 'D', 'T', 'E', '-', '>', \
 		  'B', 'P', 'R', 'L', \
 		  '+', '=', 'k', '<','[', ']', '{', '}', 'x', 'X', \
 		  '*', '#', '_', '!', '.', 'o', 'q', \
@@ -1622,6 +1644,7 @@ typedef UINT32_TYPEDEF UINT32_T;
  */
 #define MIN_COLUMNS	12	// minimal columns for screen
 #define MIN_LINES	2	// minimal lines for screen
+#define MIN_CMDHEIGHT	1	// minimal height for command line
 #define STATUS_HEIGHT	1	// height of a status line under a window
 #ifdef FEAT_MENU		// height of a status line under a window
 # define WINBAR_HEIGHT(wp)	(wp)->w_winbar_height
@@ -1988,6 +2011,7 @@ typedef int sock_T;
 // Note that gui.h is included by structs.h
 
 #include "structs.h"	// defines many structures
+#include "xdiff/xdiff.h"	// TODO: maybe remove this, but this brings in mmfile_t so it can compile
 
 #include "alloc.h"
 
@@ -2186,7 +2210,9 @@ typedef int sock_T;
 #define VV_TYPE_TYPEALIAS 107
 #define VV_TYPE_ENUM	  108
 #define VV_TYPE_ENUMVALUE 109
-#define VV_LEN		110	// number of v: vars
+#define VV_STACKTRACE	110
+#define VV_TYPE_TUPLE	111
+#define VV_LEN		112	// number of v: vars
 
 // used for v_number in VAR_BOOL and VAR_SPECIAL
 #define VVAL_FALSE	0L	// VAR_BOOL
@@ -2212,6 +2238,7 @@ typedef int sock_T;
 #define VAR_TYPE_TYPEALIAS  14
 #define VAR_TYPE_ENUM	    15
 #define VAR_TYPE_ENUMVALUE  16
+#define VAR_TYPE_TUPLE	    17
 
 #define DICT_MAXNEST 100	// maximum nesting of lists and dicts
 
@@ -2371,6 +2398,17 @@ typedef enum {
     FCERR_NOTMETHOD,	// function cannot be used as a method
     FCERR_FAILED,	// error while executing the function
 } funcerror_T;
+
+/*
+ * Array indexes used for cp_text[].
+ */
+typedef enum {
+    CPT_ABBR,		// "abbr"
+    CPT_KIND,		// "kind"
+    CPT_MENU,		// "menu"
+    CPT_INFO,		// "info"
+    CPT_COUNT,		// Number of entries
+} cpitem_T;
 
 /*
  * Type for the callback function that is invoked after an option value is

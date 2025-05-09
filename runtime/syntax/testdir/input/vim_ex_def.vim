@@ -99,11 +99,28 @@ def Foo(
     z: string = "zed")
 enddef
 
+" Issue #16243 (Vim script def parameters syntax highlight is wrong)
+
+def Test(lines: list<number> = [line('.'), line('.')]): void
+enddef
+
 
 " comments
 
 def Foo()
   # Vim9-script comment
   "useless string"
+enddef
+
+
+" leading command separator
+
+echo "Foo" | def Foo()
+enddef
+
+
+" command modifiers
+
+silent! def Foo()
 enddef
 

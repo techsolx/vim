@@ -1481,6 +1481,7 @@ find_tagfunc_tags(
     save_pos = curwin->w_cursor;
     result = call_callback(&curbuf->b_tfu_cb, 0, &rettv, 3, args);
     curwin->w_cursor = save_pos;	// restore the cursor position
+    check_cursor();			// make sure cursor position is valid
     --d->dv_refcount;
 
     if (result == FAIL)
@@ -1834,7 +1835,8 @@ findtags_in_help_init(findtags_state_T *st)
  * Use the function set in 'tagfunc' (if configured and enabled) to get the
  * tags.
  * Return OK if at least 1 tag has been successfully found, NOTDONE if the
- * 'tagfunc' is not used or the 'tagfunc' returns v:null and FAIL otherwise.
+ * 'tagfunc' is not used, still executing or the 'tagfunc' returned v:null and
+ * FAIL otherwise.
  */
     static int
 findtags_apply_tfu(findtags_state_T *st, char_u *pat, char_u *buf_ffname)
@@ -3421,6 +3423,7 @@ get_tagfname(
 	    *filename++ = NUL;
 
 	    tnp->tn_search_ctx = vim_findfile_init(buf, filename,
+		    STRLEN(filename),
 		    r_ptr, 100,
 		    FALSE,	   // don't free visited list
 		    FINDFILE_FILE, // we search for a file
@@ -3996,6 +3999,8 @@ jumpto_tag(
 	    ++sandbox;
 #endif
 	    curwin->w_cursor.lnum = 1;		// start command in line 1
+	    curwin->w_cursor.col = 0;
+	    curwin->w_cursor.coladd = 0;
 	    do_cmdline_cmd(pbuf);
 	    retval = OK;
 

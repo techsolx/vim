@@ -25,10 +25,10 @@ func PythonProg()
     if !(has('job') || executable('pkill'))
       return ''
     endif
-    if executable('python')
-      let s:python = 'python'
-    elseif executable('python3')
+    if executable('python3')
       let s:python = 'python3'
+    elseif executable('python')
+      let s:python = 'python'
     else
       return ''
     end
@@ -59,7 +59,7 @@ func RunCommand(cmd)
     let job = job_start(a:cmd, {"stoponexit": "hup"})
     call job_setoptions(job, {"stoponexit": "kill"})
   elseif has('win32')
-    exe 'silent !start cmd /c start "test_channel" ' . a:cmd
+    exe 'silent !start cmd /D /c start "test_channel" ' . a:cmd
   else
     exe 'silent !' . a:cmd . '&'
   endif
@@ -136,6 +136,34 @@ func s:kill_server(cmd)
   endif
 endfunc
 
+" Callback function to be invoked by a child terminal job. The parent could
+" then wait for the notification using WaitForChildNotification()
+let g:child_notification = 0
+func Tapi_notify_parent(bufnum, arglist)
+  let g:child_notification = 1
+endfunc
+
+" Generates a command that we can pass to a terminal job that it uses to
+" notify us. Argument 'escape' will specify whether to escape the double
+" quote.
+func TermNotifyParentCmd(escape)
+  call assert_false(has("win32"), 'Windows does not support terminal API right now. Use another method to synchronize timing.')
+  let cmd = '\033]51;["call", "Tapi_notify_parent", []]\007'
+  if a:escape
+    return escape(cmd, '"')
+  endif
+  return cmd
+endfunc
+
+" Wait for a child process to notify us. This allows us to sequence events in
+" conjunction with the child. Currently the only supported notification method
+" is for a terminal job to call Tapi_notify_parent() using terminal API.
+func WaitForChildNotification(...)
+  let timeout = get(a:000, 0, 5000)
+  call WaitFor({-> g:child_notification == 1}, timeout)
+  let g:child_notification = 0
+endfunc
+
 " Wait for up to five seconds for "expr" to become true.  "expr" can be a
 " stringified expression to evaluate, or a funcref without arguments.
 " Using a lambda works best.  Example:
@@ -162,7 +190,7 @@ endfunc
 " A second argument can be used to specify a different timeout in msec.
 "
 " Return zero for success, one for failure (like the assert function).
-func WaitForAssert(assert, ...)
+func g:WaitForAssert(assert, ...)
   let timeout = get(a:000, 0, 5000)
   if s:WaitForCommon(v:null, a:assert, timeout) < 0
     return 1
@@ -200,11 +228,11 @@ func s:WaitForCommon(expr, assert, timeout)
       call remove(v:errors, -1)
     endif
 
-    sleep 10m
+    sleep 1m
     if exists('*reltimefloat')
       let slept = float2nr(reltimefloat(reltime(start)) * 1000)
     else
-      let slept += 10
+      let slept += 1
     endif
   endwhile
 
@@ -317,6 +345,14 @@ endfunc
 func RunningWithValgrind()
   return GetVimCommand() =~ '\<valgrind\>'
 endfunc
+
+func RunningAsan()
+  return exists("$ASAN_OPTIONS")
+endfunc
+
+func ValgrindOrAsan()
+  return RunningWithValgrind() || RunningAsan()
+endfun
 
 " Get the command to run Vim, with --clean instead of "-u NONE".
 func GetVimCommandClean()

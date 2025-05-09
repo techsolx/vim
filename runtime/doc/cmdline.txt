@@ -1,4 +1,4 @@
-*cmdline.txt*   For Vim version 9.1.  Last change: 2024 Aug 20
+*cmdline.txt*   For Vim version 9.1.  Last change: 2025 Mar 08
 
 
 		  VIM REFERENCE MANUAL    by Bram Moolenaar
@@ -88,6 +88,10 @@ CTRL-SHIFT-V				*c_CTRL-SHIFT-V* *c_CTRL-SHIFT-Q*
 CTRL-SHIFT-Q	Works just like CTRL-V, unless |modifyOtherKeys| is active,
 		then it inserts the Escape sequence for a key with modifiers.
 		In the GUI the |key-notation| is inserted without simplifying.
+		Note: When CTRL-SHIFT-V is intercepted by your system (e.g.,
+		to paste text) you can often use CTRL-SHIFT-Q instead.
+		However, in some terminals (e.g. GNOME Terminal), CTRL-SHIFT-Q
+		quits the terminal without confirmation.
 
 							*c_<Left>* *c_Left*
 <Left>		cursor left.  See 'wildmenu' for behavior during wildmenu
@@ -481,13 +485,13 @@ The 'wildignorecase' option can be set to ignore case in filenames.  For
 completing other texts (e.g. command names), the 'ignorecase' option is used
 instead (fuzzy matching always ignores case, however).
 
-If you like tcsh's autolist completion, you can use this mapping:
+If you like tcsh's autolist completion, you can use this mapping: >
 	:cnoremap X <C-L><C-D>
 (Where X is the command key to use, <C-L> is CTRL-L and <C-D> is CTRL-D)
 This will find the longest match and then list all matching files.
 
 If you like tcsh's autolist completion, you can use the 'wildmode' option to
-emulate it.  For example, this mimics autolist=ambiguous:
+emulate it.  For example, this mimics autolist=ambiguous: >
 	:set wildmode=longest,list
 This will find the longest match with the first 'wildchar', then list all
 matching files with the next.

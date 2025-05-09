@@ -302,6 +302,36 @@ func Test_smoothscroll_diff_mode()
   call StopVimInTerminal(buf)
 endfunc
 
+func Test_smoothscroll_diff_change_line()
+  CheckScreendump
+
+  let lines =<< trim END
+    set diffopt+=followwrap smoothscroll
+    call setline(1, repeat(' abc', &columns))
+    call setline(2, 'bar')
+    call setline(3, repeat(' abc', &columns))
+    vnew
+    call setline(1, repeat(' abc', &columns))
+    call setline(2, 'foo')
+    call setline(3, 'bar')
+    call setline(4, repeat(' abc', &columns))
+    windo exe "normal! 2gg5\<C-E>"
+    windo diffthis
+  END
+  call writefile(lines, 'XSmoothDiffChangeLine', 'D')
+  let buf = RunVimInTerminal('-S XSmoothDiffChangeLine', #{rows: 20, columns: 55})
+
+  call VerifyScreenDump(buf, 'Test_smooth_diff_change_line_1', {})
+  call term_sendkeys(buf, "Abar")
+  call VerifyScreenDump(buf, 'Test_smooth_diff_change_line_2', {})
+  call term_sendkeys(buf, "\<Esc>")
+  call VerifyScreenDump(buf, 'Test_smooth_diff_change_line_3', {})
+  call term_sendkeys(buf, "yyp")
+  call VerifyScreenDump(buf, 'Test_smooth_diff_change_line_4', {})
+
+  call StopVimInTerminal(buf)
+endfunc
+
 func Test_smoothscroll_wrap_scrolloff_zero()
   CheckScreendump
 
@@ -1184,6 +1214,61 @@ func Test_smooth_long_scrolloff()
   call VerifyScreenDump(buf, 'Test_smooth_long_scrolloff_7', {})
 
   call StopVimInTerminal(buf)
+endfunc
+
+func Test_smoothscroll_listchars_eol()
+  call NewWindow(10, 40)
+  setlocal list listchars=eol:$ scrolloff=0 smoothscroll
+  call setline(1, repeat('-', 40))
+  call append(1, repeat(['foobar'], 10))
+
+  normal! G
+  call assert_equal(2, line('w0'))
+  call assert_equal(0, winsaveview().skipcol)
+
+  exe "normal! \<C-Y>"
+  call assert_equal(1, line('w0'))
+  call assert_equal(40, winsaveview().skipcol)
+
+  exe "normal! \<C-Y>"
+  call assert_equal(1, line('w0'))
+  call assert_equal(0, winsaveview().skipcol)
+
+  exe "normal! \<C-Y>"
+  call assert_equal(1, line('w0'))
+  call assert_equal(0, winsaveview().skipcol)
+
+  exe "normal! \<C-E>"
+  call assert_equal(1, line('w0'))
+  call assert_equal(40, winsaveview().skipcol)
+
+  exe "normal! \<C-E>"
+  call assert_equal(2, line('w0'))
+  call assert_equal(0, winsaveview().skipcol)
+
+  for ve in ['', 'all', 'onemore']
+    let &virtualedit = ve
+    normal! gg
+    call assert_equal(1, line('w0'))
+    call assert_equal(0, winsaveview().skipcol)
+
+    exe "normal! \<C-E>"
+    redraw  " redrawing should not cause another scroll
+    call assert_equal(1, line('w0'))
+    call assert_equal(40, winsaveview().skipcol)
+
+    exe "normal! \<C-E>"
+    redraw
+    call assert_equal(2, line('w0'))
+    call assert_equal(0, winsaveview().skipcol)
+
+    if ve != 'all'
+      call assert_equal([0, 2, 1, 0], getpos('.'))
+    endif
+  endfor
+
+  set virtualedit&
+  bwipe!
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

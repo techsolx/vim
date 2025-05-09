@@ -524,7 +524,7 @@ set_indent(
     char_u	*s;
     int		todo;
     int		ind_len;	    // measured in characters
-    int		line_len;
+    int		line_len;	    // size of the line (including the NUL)
     int		doit = FALSE;
     int		ind_done = 0;	    // measured in spaces
 #ifdef FEAT_VARTABS
@@ -540,6 +540,7 @@ set_indent(
     todo = size;
     ind_len = 0;
     p = oldline = ml_get_curline();
+    line_len = ml_get_curline_len() + 1;
 
     // Calculate the buffer size for the new indent, and check to see if it
     // isn't already set
@@ -660,8 +661,10 @@ set_indent(
     if (flags & SIN_INSERT)
 	p = oldline;
     else
+    {
 	p = skipwhite(p);
-    line_len = (int)STRLEN(p) + 1;
+	line_len -= (int)(p - oldline);
+    }
 
     // If 'preserveindent' and 'expandtab' are both set keep the original
     // characters and allocate accordingly.  We will fill the rest with spaces
@@ -869,11 +872,15 @@ get_number_indent(linenr_T lnum)
 
 #if defined(FEAT_LINEBREAK) || defined(PROTO)
 /*
+ * Check "briopt" as 'breakindentopt' and update the members of "wp".
  * This is called when 'breakindentopt' is changed and when a window is
  * initialized.
+ * Returns FAIL for failure, OK otherwise.
  */
     int
-briopt_check(win_T *wp)
+briopt_check(
+    char_u	*briopt,	// when NULL: use "wp->w_p_briopt"
+    win_T	*wp)		// when NULL: only check "briopt"
 {
     char_u	*p;
     int		bri_shift = 0;
@@ -882,7 +889,11 @@ briopt_check(win_T *wp)
     int		bri_list = 0;
     int		bri_vcol = 0;
 
-    p = wp->w_p_briopt;
+    if (briopt != NULL)
+	p = briopt;
+    else
+	p = wp->w_p_briopt;
+
     while (*p != NUL)
     {
 	// Note: Keep this in sync with p_briopt_values
@@ -917,6 +928,9 @@ briopt_check(win_T *wp)
 	if (*p == ',')
 	    ++p;
     }
+
+    if (wp == NULL)
+	return OK;
 
     wp->w_briopt_shift = bri_shift;
     wp->w_briopt_min   = bri_min;
@@ -1319,7 +1333,7 @@ change_indent(
     // MODE_VREPLACE state needs to know what the line was like before changing
     if (State & VREPLACE_FLAG)
     {
-	orig_line = vim_strsave(ml_get_curline());  // Deal with NULL below
+	orig_line = vim_strnsave(ml_get_curline(), ml_get_curline_len());  // Deal with NULL below
 	orig_col = curwin->w_cursor.col;
     }
 
@@ -1418,11 +1432,13 @@ change_indent(
 	    ptr = alloc(i + 1);
 	    if (ptr != NULL)
 	    {
+		size_t ptrlen;
 		new_cursor_col += i;
 		ptr[i] = NUL;
+		ptrlen = i;
 		while (--i >= 0)
 		    ptr[i] = ' ';
-		ins_str(ptr);
+		ins_str(ptr, ptrlen);
 		vim_free(ptr);
 	    }
 	}
@@ -1495,7 +1511,7 @@ change_indent(
 	    return;
 
 	// Save new line
-	new_line = vim_strsave(ml_get_curline());
+	new_line = vim_strnsave(ml_get_curline(), ml_get_curline_len());
 	if (new_line == NULL)
 	    return;
 
@@ -1745,6 +1761,7 @@ ex_retab(exarg_T *eap)
     for (lnum = eap->line1; !got_int && lnum <= eap->line2; ++lnum)
     {
 	ptr = ml_get(lnum);
+	old_len = ml_get_len(lnum);
 	col = 0;
 	vcol = 0;
 	did_undo = FALSE;
@@ -1808,7 +1825,6 @@ ex_retab(exarg_T *eap)
 
 			// len is actual number of white characters used
 			len = num_spaces + num_tabs;
-			old_len = (long)STRLEN(ptr);
 			new_len = old_len - col + start_col + len + 1;
 			if (new_len <= 0 || new_len >= MAXCOL)
 			{
@@ -1832,6 +1848,7 @@ ex_retab(exarg_T *eap)
 			    first_line = lnum;
 			last_line = lnum;
 			ptr = new_line;
+			old_len = new_len - 1;
 			col = start_col + len;
 		    }
 		}
@@ -1987,8 +2004,7 @@ lisp_match(char_u *p)
 
     while (*word != NUL)
     {
-	(void)copy_option_part(&word, buf, LSIZE, ",");
-	len = (int)STRLEN(buf);
+	len = copy_option_part(&word, buf, LSIZE, ",");
 	if (STRNCMP(buf, p, len) == 0 && IS_WHITE_OR_NUL(p[len]))
 	    return TRUE;
     }

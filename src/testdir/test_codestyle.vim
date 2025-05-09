@@ -85,6 +85,7 @@ def Test_test_files()
             && fname !~ 'test_let.vim'
             && fname !~ 'test_tagjump.vim'
             && fname !~ 'test_vim9_cmd.vim'
+            && fname !~ 'test_vim9_enum.vim'
       cursor(1, 1)
       var lnum = search(
           fname =~ 'test_vim9_assign.vim' ? '[^=]\s$'
@@ -162,5 +163,30 @@ def Test_help_files()
   bwipe!
 enddef
 
+def Test_indent_of_source_files()
+  for fname in glob('../*.[ch]', 0, 1) + ['../xxd/xxd.c']
+    execute 'tabnew ' .. fname
+    if &expandtab
+      continue
+    endif
+    for lnum in range(1, line('$'))
+      var name: string = synIDattr(synID(lnum, 1, 0), 'name')
+      if -1 == index(['cComment', 'cCommentStart'], name)
+        var line: string = getline(lnum)
+        var indent: string = matchstr(line, '^\s*')
+        var tailing: string = matchstr(line, '\s*$')
+        if !empty(indent)
+          if indent !~# '^\t* \{0,7}$'
+            ReportError('testdir/' .. fname, lnum, 'invalid indent')
+          endif
+        endif
+        if !empty(tailing)
+          ReportError('testdir/' .. fname, lnum, 'tailing spaces')
+        endif
+      endif
+    endfor
+    close
+  endfor
+enddef
 
 " vim: shiftwidth=2 sts=2 expandtab nofoldenable

@@ -71,6 +71,7 @@ static keyvalue_T command_complete_tab[] =
     KEYVALUE_ENTRY(EXPAND_FILES, "file"),
     KEYVALUE_ENTRY(EXPAND_FILES_IN_PATH, "file_in_path"),
     KEYVALUE_ENTRY(EXPAND_FILETYPE, "filetype"),
+    KEYVALUE_ENTRY(EXPAND_FILETYPECMD, "filetypecmd"),
     KEYVALUE_ENTRY(EXPAND_FUNCTIONS, "function"),
     KEYVALUE_ENTRY(EXPAND_HELP, "help"),
     KEYVALUE_ENTRY(EXPAND_HIGHLIGHT, "highlight"),
@@ -92,6 +93,7 @@ static keyvalue_T command_complete_tab[] =
     KEYVALUE_ENTRY(EXPAND_SCRIPTNAMES, "scriptnames"),
 #endif
     KEYVALUE_ENTRY(EXPAND_SHELLCMD, "shellcmd"),
+    KEYVALUE_ENTRY(EXPAND_SHELLCMDLINE, "shellcmdline"),
 #if defined(FEAT_SIGNS)
     KEYVALUE_ENTRY(EXPAND_SIGN, "sign"),
 #endif
@@ -328,7 +330,6 @@ set_context_in_user_cmdarg(
     if (argt & EX_XFILE)
     {
 	// EX_XFILE: file names are handled before this call
-	xp->xp_context = context;
 	return NULL;
     }
 
@@ -465,7 +466,7 @@ get_user_cmd_complete(expand_T *xp UNUSED, int idx)
 {
     if (idx < 0 || idx >= (int)ARRAY_LENGTH(command_complete_tab))
 	return NULL;
-    return (char_u *)command_complete_tab[idx].value;
+    return command_complete_tab[idx].value.string;
 }
 
 /*
@@ -494,7 +495,7 @@ cmdcomplete_type_to_str(int expand)
 
     kv = get_commandtype(expand);
 
-    return (kv == NULL) ? NULL : (char_u *)kv->value;
+    return (kv == NULL) ? NULL : kv->value.string;
 }
 
 /*
@@ -514,8 +515,8 @@ cmdcomplete_str_to_type(char_u *complete_str)
 	return EXPAND_USER_LIST;
 
     target.key = 0;
-    target.value = (char *)complete_str;
-    target.length = 0;				// not used, see cmp_keyvalue_value()
+    target.value.string = complete_str;
+    target.value.length = 0;			// not used, see cmp_keyvalue_value()
 
     if (last_entry != NULL && cmp_keyvalue_value(&target, last_entry) == 0)
 	entry = last_entry;
@@ -605,7 +606,8 @@ uc_list(char_u *name, size_t name_len)
 	    msg_outtrans_attr(cmd->uc_name, HL_ATTR(HLF_D));
 	    len = (int)cmd->uc_namelen + 4;
 
-	    do {
+	    do
+	    {
 		msg_putchar(' ');
 		++len;
 	    } while (len < 22);
@@ -625,7 +627,8 @@ uc_list(char_u *name, size_t name_len)
 		case (EX_EXTRA|EX_NOSPC|EX_NEEDARG): IObuff[len++] = '1'; break;
 	    }
 
-	    do {
+	    do
+	    {
 		IObuff[len++] = ' ';
 	    } while (len < 5 - over);
 
@@ -648,7 +651,8 @@ uc_list(char_u *name, size_t name_len)
 		    IObuff[len++] = '.';
 	    }
 
-	    do {
+	    do
+	    {
 		IObuff[len++] = ' ';
 	    } while (len < 8 - over);
 
@@ -662,7 +666,8 @@ uc_list(char_u *name, size_t name_len)
 		    break;
 		}
 
-	    do {
+	    do
+	    {
 		IObuff[len++] = ' ';
 	    } while (len < 13 - over);
 
@@ -670,8 +675,8 @@ uc_list(char_u *name, size_t name_len)
 	    entry = get_commandtype(cmd->uc_compl);
 	    if (entry != NULL)
 	    {
-		STRCPY(IObuff + len, entry->value);
-		len += entry->length;
+		STRCPY(IObuff + len, entry->value.string);
+		len += (int)entry->value.length;
 #ifdef FEAT_EVAL
 		if (p_verbose > 0 && cmd->uc_compl_arg != NULL)
 		{
@@ -681,13 +686,14 @@ uc_list(char_u *name, size_t name_len)
 		    {
 			IObuff[len++] = ',';
 			STRCPY(IObuff + len, cmd->uc_compl_arg);
-			len += uc_compl_arglen;
+			len += (int)uc_compl_arglen;
 		    }
 		}
 #endif
 	    }
 
-	    do {
+	    do
+	    {
 		IObuff[len++] = ' ';
 	    } while (len < 25 - over);
 
@@ -826,8 +832,8 @@ parse_compl_arg(
     }
 
     target.key = 0;
-    target.value = (char *)value;
-    target.length = valend;
+    target.value.string = value;
+    target.value.length = valend;
 
     if (last_entry != NULL && cmp_keyvalue_value_n(&target, last_entry) == 0)
 	entry = last_entry;
@@ -850,7 +856,7 @@ parse_compl_arg(
     *complp = entry->key;
     if (*complp == EXPAND_BUFFERS)
 	*argt |= EX_BUFNAME;
-    else if (*complp == EXPAND_DIRECTORIES || *complp == EXPAND_FILES)
+    else if (*complp == EXPAND_DIRECTORIES || *complp == EXPAND_FILES || *complp == EXPAND_SHELLCMDLINE)
 	*argt |= EX_XFILE;
 
     if (
@@ -1637,15 +1643,19 @@ produce_cmdmods(char_u *buf, cmdmod_T *cmod, int quote)
     // the modifiers that are simple flags
     for (i = 0; i < (int)ARRAY_LENGTH(mod_entry_tab); ++i)
 	if (cmod->cmod_flags & mod_entry_tab[i].key)
-	    buflen += add_cmd_modifier(buf, buflen, mod_entry_tab[i].value, mod_entry_tab[i].length, &multi_mods);
+	    buflen += add_cmd_modifier(buf, buflen,
+		    (char *)mod_entry_tab[i].value.string,
+		    mod_entry_tab[i].value.length, &multi_mods);
 
     // :silent
     if (cmod->cmod_flags & CMOD_SILENT)
     {
 	if (cmod->cmod_flags & CMOD_ERRSILENT)
-	    buflen += add_cmd_modifier(buf, buflen, "silent!", STRLEN_LITERAL("silent!"), &multi_mods);
+	    buflen += add_cmd_modifier(buf, buflen, "silent!",
+		    STRLEN_LITERAL("silent!"), &multi_mods);
 	else
-	    buflen += add_cmd_modifier(buf, buflen, "silent", STRLEN_LITERAL("silent"), &multi_mods);
+	    buflen += add_cmd_modifier(buf, buflen, "silent",
+		    STRLEN_LITERAL("silent"), &multi_mods);
     }
 
     // :verbose

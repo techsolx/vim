@@ -12,7 +12,7 @@ vim9script
 :help
  :help
 : help
- : help
+ : help # FIXME
 
 :2match
 :3match
@@ -93,7 +93,6 @@ vim9script
 :checktime
 :chistory
 :class
-:class
 :clast
 :clearjumps
 :clist
@@ -172,7 +171,6 @@ vim9script
 :elseif
 :emenu
 :endclass
-:endclass
 :enddef
 :endenum
 :endfor
@@ -205,7 +203,7 @@ vim9script
 :folddoclosed
 :folddoopen
 :foldopen
-:for
+:for foo in bar | endfor
 :function
 :global/.../
 :goto
@@ -385,8 +383,6 @@ vim9script
 :ptprevious
 :ptrewind
 :ptselect
-:public
-:public
 :put
 :pwd
 :py3
@@ -479,8 +475,6 @@ vim9script
 :startgreplace
 :startinsert
 :startreplace
-:static
-:static
 :stjump
 :stop
 :stopinsert
@@ -681,7 +675,6 @@ Foo() | checkpath
 Foo() | checktime
 Foo() | chistory
 Foo() | class
-Foo() | class
 Foo() | clast
 Foo() | clearjumps
 Foo() | clist
@@ -760,7 +753,6 @@ Foo() | else
 Foo() | elseif
 Foo() | emenu
 Foo() | endclass
-Foo() | endclass
 Foo() | enddef
 Foo() | endenum
 Foo() | endfor
@@ -793,7 +785,7 @@ Foo() | foldclose
 Foo() | folddoclosed
 Foo() | folddoopen
 Foo() | foldopen
-Foo() | for
+Foo() | for foo in bar | endfor
 Foo() | function
 Foo() | global/.../
 Foo() | goto
@@ -972,8 +964,6 @@ Foo() | ptNext
 Foo() | ptprevious
 Foo() | ptrewind
 Foo() | ptselect
-Foo() | public
-Foo() | public
 Foo() | put
 Foo() | pwd
 Foo() | py3
@@ -1066,8 +1056,6 @@ Foo() | stag
 Foo() | startgreplace
 Foo() | startinsert
 Foo() | startreplace
-Foo() | static
-Foo() | static
 Foo() | stjump
 Foo() | stop
 Foo() | stopinsert

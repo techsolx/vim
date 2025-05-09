@@ -209,6 +209,7 @@
 #undef HAVE_CANBERRA
 #undef HAVE_SODIUM
 #undef HAVE_ST_BLKSIZE
+#undef HAVE_SYNC
 #undef HAVE_SYSCONF
 #undef HAVE_SYSCTL
 #undef HAVE_SYSINFO
@@ -428,6 +429,9 @@
 
 /* Define if there is a working dgettext(). */
 #undef HAVE_DGETTEXT
+
+/* Define if there is a working dngettext(). */
+#undef HAVE_DNGETTEXT
 
 /* Define if _nl_msg_cat_cntr is present. */
 #undef HAVE_NL_MSG_CAT_CNTR
