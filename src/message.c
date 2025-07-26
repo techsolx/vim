@@ -71,8 +71,6 @@ static int msg_wait = 0;
 static FILE *verbose_fd = NULL;
 static int  verbose_did_open = FALSE;
 
-static int  did_warn_clipboard = FALSE;
-
 /*
  * When writing messages to the screen, there are many different situations.
  * A number of variables is used to remember the current state:
@@ -4172,11 +4170,11 @@ msg_warn_missing_clipboard(void)
     if (!global_busy && !did_warn_clipboard)
     {
 #ifdef FEAT_CLIPBOARD
-       msg(_("W23: Clipboard register not available, using register 0"));
+	msg(_("W23: Clipboard register not available, using register 0"));
 #else
-       msg(_("W24: Clipboard register not available. See :h W24"));
+	msg(_("W24: Clipboard register not available. See :h W24"));
 #endif
-       did_warn_clipboard = TRUE;
+	did_warn_clipboard = TRUE;
     }
 }
 

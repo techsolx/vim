@@ -693,7 +693,7 @@ edit(
 			&& stop_arrow() == OK)
 		{
 		    ins_compl_delete();
-		    ins_compl_insert(FALSE, FALSE);
+		    ins_compl_insert(FALSE);
 		}
 		// Delete preinserted text when typing special chars
 		else if (IS_WHITE_NL_OR_NUL(c) && ins_compl_preinsert_effect())
@@ -929,6 +929,8 @@ doESCkey:
 	    break;
 
 	case Ctrl_R:	// insert the contents of a register
+	    if (ctrl_x_mode_register() && !ins_compl_active())
+		goto docomplete;
 	    ins_reg();
 	    auto_format(FALSE, TRUE);
 	    inserted_space = FALSE;
@@ -981,6 +983,17 @@ doESCkey:
 	case Ctrl_H:
 	    did_backspace = ins_bs(c, BACKSPACE_CHAR, &inserted_space);
 	    auto_format(FALSE, TRUE);
+	    if (did_backspace && p_ac && !char_avail()
+		    && curwin->w_cursor.col > 0)
+	    {
+		c = char_before_cursor();
+		if (ins_compl_setup_autocompl(c))
+		{
+		    update_screen(UPD_VALID); // Show char deletion immediately
+		    out_flush();
+		    goto docomplete; // Trigger autocompletion
+		}
+	    }
 	    break;
 
 	case Ctrl_W:	// delete word before the cursor
@@ -1399,6 +1412,14 @@ normalchar:
 	    // closed fold.
 	    foldOpenCursor();
 #endif
+	    // Trigger autocompletion
+	    if (p_ac && !char_avail() && ins_compl_setup_autocompl(c))
+	    {
+		update_screen(UPD_VALID); // Show character immediately
+		out_flush();
+		goto docomplete;
+	    }
+
 	    break;
 	}   // end of switch (c)
 
@@ -2195,7 +2216,7 @@ insertchar(
 	    i -= middle_len;
 
 	    // Check some expected things before we go on
-	    if (i >= 0 && lead_end[end_len - 1] == end_comment_pending)
+	    if (i >= 0 && end_len > 0 && lead_end[end_len - 1] == end_comment_pending)
 	    {
 		// Backspace over all the stuff we want to replace
 		backspace_until_column(i);
@@ -2231,6 +2252,10 @@ insertchar(
     if (       !ISSPECIAL(c)
 	    && (!has_mbyte || (*mb_char2len)(c) == 1)
 	    && !has_insertcharpre()
+#ifdef FEAT_EVAL
+	    // Skip typeahead if test_override("char_avail", 1) was called.
+	    && !disable_char_avail_for_testing
+#endif
 	    && vpeekc() != NUL
 	    && !(State & REPLACE_FLAG)
 	    && !cindent_on()

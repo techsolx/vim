@@ -165,7 +165,6 @@ pum_display(
 		      && pum_win_row - above_row > (below_row - above_row) / 2)
 	{
 	    // pum above "pum_win_row"
-
 	    if (State == MODE_CMDLINE)
 		// for cmdline pum, no need for context lines
 		context_lines = 0;
@@ -192,13 +191,12 @@ pum_display(
 	else
 	{
 	    // pum below "pum_win_row"
-
 	    if (State == MODE_CMDLINE)
 		// for cmdline pum, no need for context lines
 		context_lines = 0;
 	    else
 	    {
-		// Leave two lines of context if possible
+		// Leave three lines of context if possible
 		validate_cheight();
 		cline_visible_offset = curwin->w_cline_row +
 				    curwin->w_cline_height - curwin->w_wrow;
@@ -589,14 +587,16 @@ pum_display_rtl_text(
 	int     width,
 	int     width_limit,
 	int     totwidth,
-	int     next_isempty)
+	int     next_isempty,
+	int	selected)
 {
-    char_u  *rt;
-    int     cells;
+    char_u  *rt = NULL;
+    int     cells = 0;
     int     over_cell = 0;
     int     truncated = FALSE;
     int     pad = next_isempty ? 0 : 2;
-    int     remaining;
+    int     remaining = 0;
+    int	    trunc_attr = highlight_attr[selected ? HLF_PSI : HLF_PNI];
     int	    truncrl = curwin->w_fill_chars.truncrl != NUL
 					? curwin->w_fill_chars.truncrl : '<';
 
@@ -656,7 +656,7 @@ pum_display_rtl_text(
 	width = cells + over_cell + 1;
 	rt = orig_rt;
 
-	screen_putchar(truncrl, row, col - width + 1, attr);
+	screen_putchar(truncrl, row, col - width + 1, trunc_attr);
 
 	if (over_cell > 0)
 	    screen_fill(row, row + 1, col - width + 2,
@@ -689,15 +689,17 @@ pum_display_ltr_text(
 	int     width,        // width already calculated in outer loop
 	int     width_limit,
 	int     totwidth,
-	int     next_isempty)
+	int     next_isempty,
+	int	selected)
 {
-    int     size;
-    int     cells;
+    int     size = 0;
+    int     cells = 0;
     char_u  *st_end = NULL;
     int     over_cell = 0;
     int     pad = next_isempty ? 0 : 2;
-    int     truncated;
-    int     remaining;
+    int     truncated = FALSE;
+    int     remaining = 0;
+    int	    trunc_attr = highlight_attr[selected ? HLF_PSI : HLF_PNI];
     int	    trunc = curwin->w_fill_chars.trunc != NUL
 					    ? curwin->w_fill_chars.trunc : '>';
 
@@ -753,7 +755,7 @@ pum_display_ltr_text(
 	    screen_fill(row, row + 1, col + cells,
 		    col + cells + over_cell, ' ', ' ', attr);
 
-	screen_putchar(trunc, row, col + cells + over_cell, attr);
+	screen_putchar(trunc, row, col + cells + over_cell, trunc_attr);
     }
 
     VIM_CLEAR(st);
@@ -782,6 +784,7 @@ pum_process_item(
     char_u  *p = pum_get_item(idx, item_type);
     int     width = 0;  // item width
     int     w;		// char width
+    int	    selected = idx == pum_selected;
 
     for ( ; ; MB_PTR_ADV(p))
     {
@@ -812,11 +815,11 @@ pum_process_item(
 #ifdef FEAT_RIGHTLEFT
 	if (pum_rl)
 	    col = pum_display_rtl_text(row, col, st, attr, attrs,
-		    width, pum_width, *totwidth_ptr, next_isempty);
+		    width, pum_width, *totwidth_ptr, next_isempty, selected);
 	else
 #endif
 	    col = pum_display_ltr_text(row, col, st, attr, attrs,
-		    width, pum_width, *totwidth_ptr, next_isempty);
+		    width, pum_width, *totwidth_ptr, next_isempty, selected);
 
 	if (attrs != NULL)
 	    VIM_CLEAR(attrs);
@@ -1156,12 +1159,14 @@ pum_set_selected(int n, int repeat UNUSED)
 	 * 'completeopt' contains "preview" or "popup" or "popuphidden".
 	 * Skip this when tried twice already.
 	 * Skip this also when there is not much room.
+	 * Skip this for command-window when 'completeopt' contains "preview".
 	 * NOTE: Be very careful not to sync undo!
 	 */
 	if (pum_array[pum_selected].pum_info != NULL
 		&& Rows > 10
 		&& repeat <= 1
-		&& (cur_cot_flags & COT_ANY_PREVIEW))
+		&& (cur_cot_flags & COT_ANY_PREVIEW)
+		&& !((cur_cot_flags & COT_PREVIEW) && cmdwin_type != 0))
 	{
 	    win_T	*curwin_save = curwin;
 	    tabpage_T   *curtab_save = curtab;
@@ -1396,6 +1401,9 @@ pum_undisplay(void)
     pum_array = NULL;
     redraw_all_later(UPD_NOT_VALID);
     redraw_tabline = TRUE;
+#if defined(FEAT_TABPANEL)
+    redraw_tabpanel = TRUE;
+#endif
     if (pum_in_cmdline)
     {
 	clear_cmdline = TRUE;

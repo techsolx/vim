@@ -555,6 +555,11 @@ static char *(features[]) =
 #if defined(USE_SYSTEM) && defined(UNIX)
 	"+system()",
 #endif
+#if defined(FEAT_TABPANEL)
+	"+tabpanel",
+#else
+	"-tabpanel",
+#endif
 	"+tag_binary",
 	"-tag_old_static",
 	"-tag_any_white",
@@ -639,6 +644,16 @@ static char *(features[]) =
 	"-vtp",
 # endif
 #endif
+#ifdef FEAT_WAYLAND
+	"+wayland",
+#else
+	"-wayland",
+#endif
+#ifdef FEAT_WAYLAND_CLIPBOARD
+	"+wayland_clipboard",
+#else
+	"-wayland_clipboard",
+#endif
 	"+wildignore",
 	"+wildmenu",
 	"+windows",
@@ -704,6 +719,440 @@ static char *(features[]) =
 
 static int included_patches[] =
 {   /* Add new patch number below this line */
+/**/
+    1591,
+/**/
+    1590,
+/**/
+    1589,
+/**/
+    1588,
+/**/
+    1587,
+/**/
+    1586,
+/**/
+    1585,
+/**/
+    1584,
+/**/
+    1583,
+/**/
+    1582,
+/**/
+    1581,
+/**/
+    1580,
+/**/
+    1579,
+/**/
+    1578,
+/**/
+    1577,
+/**/
+    1576,
+/**/
+    1575,
+/**/
+    1574,
+/**/
+    1573,
+/**/
+    1572,
+/**/
+    1571,
+/**/
+    1570,
+/**/
+    1569,
+/**/
+    1568,
+/**/
+    1567,
+/**/
+    1566,
+/**/
+    1565,
+/**/
+    1564,
+/**/
+    1563,
+/**/
+    1562,
+/**/
+    1561,
+/**/
+    1560,
+/**/
+    1559,
+/**/
+    1558,
+/**/
+    1557,
+/**/
+    1556,
+/**/
+    1555,
+/**/
+    1554,
+/**/
+    1553,
+/**/
+    1552,
+/**/
+    1551,
+/**/
+    1550,
+/**/
+    1549,
+/**/
+    1548,
+/**/
+    1547,
+/**/
+    1546,
+/**/
+    1545,
+/**/
+    1544,
+/**/
+    1543,
+/**/
+    1542,
+/**/
+    1541,
+/**/
+    1540,
+/**/
+    1539,
+/**/
+    1538,
+/**/
+    1537,
+/**/
+    1536,
+/**/
+    1535,
+/**/
+    1534,
+/**/
+    1533,
+/**/
+    1532,
+/**/
+    1531,
+/**/
+    1530,
+/**/
+    1529,
+/**/
+    1528,
+/**/
+    1527,
+/**/
+    1526,
+/**/
+    1525,
+/**/
+    1524,
+/**/
+    1523,
+/**/
+    1522,
+/**/
+    1521,
+/**/
+    1520,
+/**/
+    1519,
+/**/
+    1518,
+/**/
+    1517,
+/**/
+    1516,
+/**/
+    1515,
+/**/
+    1514,
+/**/
+    1513,
+/**/
+    1512,
+/**/
+    1511,
+/**/
+    1510,
+/**/
+    1509,
+/**/
+    1508,
+/**/
+    1507,
+/**/
+    1506,
+/**/
+    1505,
+/**/
+    1504,
+/**/
+    1503,
+/**/
+    1502,
+/**/
+    1501,
+/**/
+    1500,
+/**/
+    1499,
+/**/
+    1498,
+/**/
+    1497,
+/**/
+    1496,
+/**/
+    1495,
+/**/
+    1494,
+/**/
+    1493,
+/**/
+    1492,
+/**/
+    1491,
+/**/
+    1490,
+/**/
+    1489,
+/**/
+    1488,
+/**/
+    1487,
+/**/
+    1486,
+/**/
+    1485,
+/**/
+    1484,
+/**/
+    1483,
+/**/
+    1482,
+/**/
+    1481,
+/**/
+    1480,
+/**/
+    1479,
+/**/
+    1478,
+/**/
+    1477,
+/**/
+    1476,
+/**/
+    1475,
+/**/
+    1474,
+/**/
+    1473,
+/**/
+    1472,
+/**/
+    1471,
+/**/
+    1470,
+/**/
+    1469,
+/**/
+    1468,
+/**/
+    1467,
+/**/
+    1466,
+/**/
+    1465,
+/**/
+    1464,
+/**/
+    1463,
+/**/
+    1462,
+/**/
+    1461,
+/**/
+    1460,
+/**/
+    1459,
+/**/
+    1458,
+/**/
+    1457,
+/**/
+    1456,
+/**/
+    1455,
+/**/
+    1454,
+/**/
+    1453,
+/**/
+    1452,
+/**/
+    1451,
+/**/
+    1450,
+/**/
+    1449,
+/**/
+    1448,
+/**/
+    1447,
+/**/
+    1446,
+/**/
+    1445,
+/**/
+    1444,
+/**/
+    1443,
+/**/
+    1442,
+/**/
+    1441,
+/**/
+    1440,
+/**/
+    1439,
+/**/
+    1438,
+/**/
+    1437,
+/**/
+    1436,
+/**/
+    1435,
+/**/
+    1434,
+/**/
+    1433,
+/**/
+    1432,
+/**/
+    1431,
+/**/
+    1430,
+/**/
+    1429,
+/**/
+    1428,
+/**/
+    1427,
+/**/
+    1426,
+/**/
+    1425,
+/**/
+    1424,
+/**/
+    1423,
+/**/
+    1422,
+/**/
+    1421,
+/**/
+    1420,
+/**/
+    1419,
+/**/
+    1418,
+/**/
+    1417,
+/**/
+    1416,
+/**/
+    1415,
+/**/
+    1414,
+/**/
+    1413,
+/**/
+    1412,
+/**/
+    1411,
+/**/
+    1410,
+/**/
+    1409,
+/**/
+    1408,
+/**/
+    1407,
+/**/
+    1406,
+/**/
+    1405,
+/**/
+    1404,
+/**/
+    1403,
+/**/
+    1402,
+/**/
+    1401,
+/**/
+    1400,
+/**/
+    1399,
+/**/
+    1398,
+/**/
+    1397,
+/**/
+    1396,
+/**/
+    1395,
+/**/
+    1394,
+/**/
+    1393,
+/**/
+    1392,
+/**/
+    1391,
+/**/
+    1390,
+/**/
+    1389,
+/**/
+    1388,
+/**/
+    1387,
+/**/
+    1386,
+/**/
+    1385,
+/**/
+    1384,
+/**/
+    1383,
+/**/
+    1382,
+/**/
+    1381,
+/**/
+    1380,
+/**/
+    1379,
+/**/
+    1378,
+/**/
+    1377,
+/**/
+    1376,
+/**/
+    1375,
 /**/
     1374,
 /**/
@@ -3663,13 +4112,21 @@ list_version(void)
 # ifdef FEAT_GUI_MSWIN
 #  ifdef VIMDLL
 #   ifdef _WIN64
-    msg_puts(_("\nMS-Windows 64-bit GUI/console version"));
+#    if defined(_M_ARM64) || defined(_M_ARM64EC)
+     msg_puts(_("\nMS-Windows ARM64 GUI/console version"));
+#    else
+     msg_puts(_("\nMS-Windows 64-bit GUI/console version"));
+#    endif
 #   else
     msg_puts(_("\nMS-Windows 32-bit GUI/console version"));
 #   endif
 #  else
 #   ifdef _WIN64
-    msg_puts(_("\nMS-Windows 64-bit GUI version"));
+#    if defined(_M_ARM64) || defined(_M_ARM64EC)
+     msg_puts(_("\nMS-Windows ARM64 GUI version"));
+#    else
+     msg_puts(_("\nMS-Windows 64-bit GUI version"));
+#    endif
 #   else
     msg_puts(_("\nMS-Windows 32-bit GUI version"));
 #   endif
@@ -3679,7 +4136,11 @@ list_version(void)
 #  endif
 # else
 #  ifdef _WIN64
+#   if defined(_M_ARM64) || defined(_M_ARM64EC)
+    msg_puts(_("\nMS-Windows ARM64 console version"));
+#   else
     msg_puts(_("\nMS-Windows 64-bit console version"));
+#   endif
 #  else
     msg_puts(_("\nMS-Windows 32-bit console version"));
 #  endif
@@ -3699,13 +4160,19 @@ list_version(void)
 #endif
 
 #ifdef VMS
-    msg_puts(_("\nOpenVMS version"));
+    msg_puts(_("\nOpenVMS (build) arch, version"));
 # ifdef HAVE_PATHDEF
     if (*compiled_arch != NUL)
     {
-	msg_puts(" - ");
+	msg_puts(": ");
 	msg_puts((char *)compiled_arch);
+	if (*compiled_vers != NUL)
+	{
+	    msg_puts(", ");
+	    msg_puts((char *)compiled_vers);
+	}
     }
+
 # endif
 
 #endif
@@ -3785,9 +4252,9 @@ list_version(void)
 # if defined(USE_GTK3)
     msg_puts(_("with GTK3 GUI."));
 # elif defined(FEAT_GUI_GNOME)
-     msg_puts(_("with GTK2-GNOME GUI."));
+    msg_puts(_("with GTK2-GNOME GUI."));
 # else
-     msg_puts(_("with GTK2 GUI."));
+    msg_puts(_("with GTK2 GUI."));
 # endif
 #elif defined(FEAT_GUI_MOTIF)
     msg_puts(_("with X11-Motif GUI."));
@@ -4005,7 +4472,7 @@ intro_message(
 
     // start displaying the message lines after half of the blank lines
     row = blanklines / 2;
-    if ((row >= 2 && Columns >= 50) || colon)
+    if ((row >= 2 && topframe->fr_width >= 50) || colon)
     {
 	for (i = 0; i < (int)ARRAY_LENGTH(lines); ++i)
 	{
@@ -4088,7 +4555,7 @@ do_intro_line(
 	}
 	col += (int)STRLEN(vers);
     }
-    col = (Columns - col) / 2;
+    col = (topframe->fr_width - col) / 2;
     if (col < 0)
 	col = 0;
 
@@ -4107,13 +4574,14 @@ do_intro_line(
 	    else
 		clen += byte2cells(p[l]);
 	}
-	screen_puts_len(p, l, row, col, *p == '<' ? HL_ATTR(HLF_8) : attr);
+	screen_puts_len(p, l, row, col + firstwin->w_wincol,
+		*p == '<' ? HL_ATTR(HLF_8) : attr);
 	col += clen;
     }
 
     // Add the version number to the version line.
     if (add_version)
-	screen_puts(vers, row, col, 0);
+	screen_puts(vers, row, col + firstwin->w_wincol, 0);
 }
 
 /*
@@ -4123,6 +4591,9 @@ do_intro_line(
 ex_intro(exarg_T *eap UNUSED)
 {
     screenclear();
+#if defined(FEAT_TABPANEL)
+    draw_tabpanel();
+#endif
     intro_message(TRUE);
     wait_return(TRUE);
 }

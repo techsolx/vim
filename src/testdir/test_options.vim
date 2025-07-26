@@ -1,9 +1,5 @@
 " Test for options
 
-source shared.vim
-source check.vim
-source view_util.vim
-
 scriptencoding utf-8
 
 func Test_whichwrap()
@@ -274,7 +270,7 @@ func Test_complete()
   call assert_fails('set complete=ix', 'E535:')
   call assert_fails('set complete=x', 'E539:')
   call assert_fails('set complete=..', 'E535:')
-  set complete=.,w,b,u,k,\ s,i,d,],t,U,f,o
+  set complete=.,w,b,u,k,\ s,i,d,],t,U,F,o
   call assert_fails('set complete=i^-10', 'E535:')
   call assert_fails('set complete=i^x', 'E535:')
   call assert_fails('set complete=k^2,t^-1,s^', 'E535:')
@@ -282,25 +278,25 @@ func Test_complete()
   call assert_fails('set complete=kfoo^foo2', 'E535:')
   call assert_fails('set complete=kfoo^', 'E535:')
   call assert_fails('set complete=.^', 'E535:')
-  set complete=.,w,b,u,k,s,i,d,],t,U,f,o
+  set complete=.,w,b,u,k,s,i,d,],t,U,F,o
   set complete=.
   set complete=.^10,t^0
-  set complete+=ffuncref('foo'\\,\ [10])
-  set complete=ffuncref('foo'\\,\ [10])^10
+  set complete+=Ffuncref('foo'\\,\ [10])
+  set complete=Ffuncref('foo'\\,\ [10])^10
   set complete&
-  set complete+=ffunction('g:foo'\\,\ [10\\,\ 20])
+  set complete+=Ffunction('g:foo'\\,\ [10\\,\ 20])
   set complete&
 endfun
 
 func Test_set_completion()
   call feedkeys(":set di\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"set dictionary diff diffexpr diffopt digraph directory display', @:)
+  call assert_equal('"set dictionary diff diffanchors diffexpr diffopt digraph directory display', @:)
 
   call feedkeys(":setlocal di\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"setlocal dictionary diff diffexpr diffopt digraph directory display', @:)
+  call assert_equal('"setlocal dictionary diff diffanchors diffexpr diffopt digraph directory display', @:)
 
   call feedkeys(":setglobal di\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"setglobal dictionary diff diffexpr diffopt digraph directory display', @:)
+  call assert_equal('"setglobal dictionary diff diffanchors diffexpr diffopt digraph directory display', @:)
 
   " Expand boolean options. When doing :set no<Tab> Vim prefixes the option
   " names with "no".
@@ -344,15 +340,15 @@ func Test_set_completion()
   " Expand directories.
   call feedkeys(":set cdpath=./\<C-A>\<C-B>\"\<CR>", 'tx')
   call assert_match(' ./samples/ ', @:)
-  call assert_notmatch(' ./summarize.vim ', @:)
+  call assert_notmatch(' ./util/summarize.vim ', @:)
   set cdpath&
 
   " Expand files and directories.
   call feedkeys(":set tags=./\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_match(' ./samples/.* ./summarize.vim', @:)
+  call assert_match(' ./samples/.* ./test10.in', @:)
 
   call feedkeys(":set tags=./\\\\ dif\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"set tags=./\\ diff diffexpr diffopt', @:)
+  call assert_equal('"set tags=./\\ diff diffanchors diffexpr diffopt', @:)
 
   " Expand files with spaces/commas in them. Make sure we delimit correctly.
   "
@@ -523,6 +519,13 @@ func Test_set_completion_string_values()
   if exists('+clipboard')
     call assert_match('unnamed', getcompletion('set clipboard=', 'cmdline')[1])
   endif
+  if exists('+clipmethod')
+    if has('unix') || has('vms')
+      call assert_match('wayland', getcompletion('set clipmethod=', 'cmdline')[1])
+    else
+      call assert_match('wayland', getcompletion('set clipmethod=', 'cmdline')[0])
+    endif
+  endif
   call assert_equal('.', getcompletion('set complete=', 'cmdline')[1])
   call assert_equal('menu', getcompletion('set completeopt=', 'cmdline')[1])
   call assert_equal('keyword', getcompletion('set completefuzzycollect=', 'cmdline')[0])
@@ -602,6 +605,7 @@ func Test_set_completion_string_values()
 
   " Other string options that queries the system rather than fixed enum names
   call assert_equal(['all', 'BufAdd'], getcompletion('set eventignore=', 'cmdline')[0:1])
+  call assert_equal(['-BufAdd', '-BufCreate'], getcompletion('set eventignore=all,-', 'cmdline')[0:1])
   call assert_equal(['WinLeave', 'WinResized', 'WinScrolled'], getcompletion('set eiw=', 'cmdline')[-3:-1])
   call assert_equal('latin1', getcompletion('set fileencodings=', 'cmdline')[1])
   call assert_equal('top', getcompletion('set printoptions=', 'cmdline')[0])
@@ -729,7 +733,7 @@ func Test_set_completion_string_values()
   set diffopt=
   call assert_equal([], getcompletion('set diffopt-=', 'cmdline'))
   " Test all possible values
-  call assert_equal(['filler', 'context:', 'iblank', 'icase', 'iwhite', 'iwhiteall', 'iwhiteeol', 'horizontal',
+  call assert_equal(['filler', 'anchor', 'context:', 'iblank', 'icase', 'iwhite', 'iwhiteall', 'iwhiteeol', 'horizontal',
         \ 'vertical', 'closeoff', 'hiddenoff', 'foldcolumn:', 'followwrap', 'internal', 'indent-heuristic', 'algorithm:', 'inline:', 'linematch:'],
         \ getcompletion('set diffopt=', 'cmdline'))
   set diffopt&
@@ -2265,7 +2269,7 @@ func Test_VIM_POSIX()
     qall
   [CODE]
   if RunVim([], after, '')
-    call assert_equal(['aAbBcCdDeEfFgHiIjJkKlLmMnoOpPqrRsStuvwWxXyZz$!%*-+<>#{|&/\.;',
+    call assert_equal(['aAbBcCdDeEfFgHiIjJkKlLmMnoOpPqrRsStuvwWxXyZz$!%*-+<>#{|&/\.;~',
           \            'AS'], readfile('X_VIM_POSIX'))
   endif
 
@@ -2520,7 +2524,7 @@ func Test_string_option_revert_on_failure()
         \ ['completeopt', 'popup', 'a123'],
         \ ['completepopup', 'width:20', 'border'],
         \ ['concealcursor', 'v', 'xyz'],
-        \ ['cpoptions', 'HJ', '~'],
+        \ ['cpoptions', 'HJ', 'Q'],
         \ ['cryptmethod', 'zip', 'a123'],
         \ ['cursorlineopt', 'screenline', 'a123'],
         \ ['debug', 'throw', 'a123'],
@@ -2592,6 +2596,7 @@ func Test_string_option_revert_on_failure()
   endif
   if has('clipboard_working')
     call add(optlist, ['clipboard', 'unnamed', 'a123'])
+    call add(optlist, ['clipmethod', 'wayland', 'a123'])
   endif
   if has('win32')
     call add(optlist, ['completeslash', 'slash', 'a123'])
@@ -2900,6 +2905,17 @@ endfunc
 func Test_default_keyprotocol()
   " default value of keyprotocol
   call assert_equal('kitty:kitty,foot:kitty,ghostty:kitty,wezterm:kitty,xterm:mok2', &keyprotocol)
+endfunc
+
+func Test_showcmd()
+  " in no-cp mode, 'showcmd' is enabled
+  let _cp=&cp
+  call assert_equal(1, &showcmd)
+  set cp
+  call assert_equal(0, &showcmd)
+  set nocp
+  call assert_equal(1, &showcmd)
+  let &cp = _cp
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

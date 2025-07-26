@@ -566,6 +566,26 @@ gchar_cursor(void)
 }
 
 /*
+ * Return the character immediately before the cursor.
+ */
+    int
+char_before_cursor(void)
+{
+    if (curwin->w_cursor.col == 0)
+	return -1;
+
+    char_u *line = ml_get_curline();
+
+    if (has_mbyte)
+    {
+	char_u *p = line + curwin->w_cursor.col;
+	int prev_len = (*mb_head_off)(line, p - 1) + 1;
+	return mb_ptr2char(p - prev_len);
+    }
+    return line[curwin->w_cursor.col - 1];
+}
+
+/*
  * Write a character at the current cursor position.
  * It is directly written into the block.
  */
@@ -1401,16 +1421,16 @@ expand_env_save_opt(char_u *src, int one)
  * Skips over "\ ", "\~" and "\$" (not for Win32 though).
  * If anything fails no expansion is done and dst equals src.
  */
-    void
+    size_t
 expand_env(
     char_u	*src,		// input string e.g. "$HOME/vim.hlp"
     char_u	*dst,		// where to put the result
     int		dstlen)		// maximum length of the result
 {
-    expand_env_esc(src, dst, dstlen, FALSE, FALSE, NULL);
+    return expand_env_esc(src, dst, dstlen, FALSE, FALSE, NULL);
 }
 
-    void
+    size_t
 expand_env_esc(
     char_u	*srcp,		// input string e.g. "$HOME/vim.hlp"
     char_u	*dst,		// where to put the result
@@ -1427,6 +1447,7 @@ expand_env_esc(
     int		mustfree;	// var was allocated, need to free it later
     int		at_start = TRUE; // at start of a name
     int		startstr_len = 0;
+    char_u	*dst_start = dst;
 
     if (startstr != NULL)
 	startstr_len = (int)STRLEN(startstr);
@@ -1577,6 +1598,7 @@ expand_env_esc(
 		 */
 		{
 		    char_u	test[MAXPATHL], paths[MAXPATHL];
+		    size_t	testlen;
 		    char_u	*path, *next_path, *ptr;
 		    stat_T	st;
 
@@ -1588,14 +1610,20 @@ expand_env_esc(
 				next_path++);
 			if (*next_path)
 			    *next_path++ = NUL;
-			STRCPY(test, path);
-			STRCAT(test, "/");
-			STRCAT(test, dst + 1);
+			testlen = vim_snprintf_safelen(
+			    (char *)test,
+			    sizeof(test),
+			    "%s/%s",
+			    path,
+			    dst + 1);
 			if (mch_stat(test, &st) == 0)
 			{
-			    var = alloc(STRLEN(test) + 1);
-			    STRCPY(var, test);
-			    mustfree = TRUE;
+			    var = alloc(testlen + 1);
+			    if (var != NULL)
+			    {
+				STRCPY(var, test);
+				mustfree = TRUE;
+			    }
 			    break;
 			}
 		    }
@@ -1641,23 +1669,26 @@ expand_env_esc(
 		}
 	    }
 
-	    if (var != NULL && *var != NUL
-		    && (STRLEN(var) + STRLEN(tail) + 1 < (unsigned)dstlen))
+	    if (var != NULL && *var != NUL)
 	    {
-		STRCPY(dst, var);
-		dstlen -= (int)STRLEN(var);
 		c = (int)STRLEN(var);
-		// if var[] ends in a path separator and tail[] starts
-		// with it, skip a character
-		if (after_pathsep(dst, dst + c)
+
+		if (c + STRLEN(tail) + 1 < (unsigned)dstlen)
+		{
+		    STRCPY(dst, var);
+		    dstlen -= c;
+		    // if var[] ends in a path separator and tail[] starts
+		    // with it, skip a character
+		    if (after_pathsep(dst, dst + c)
 #if defined(BACKSLASH_IN_FILENAME) || defined(AMIGA)
-			&& dst[c - 1] != ':'
+			    && dst[c - 1] != ':'
 #endif
-			&& vim_ispathsep(*tail))
-		    ++tail;
-		dst += c;
-		src = tail;
-		copy_char = FALSE;
+			    && vim_ispathsep(*tail))
+			++tail;
+		    dst += c;
+		    src = tail;
+		    copy_char = FALSE;
+		}
 	    }
 	    if (mustfree)
 		vim_free(var);
@@ -1692,6 +1723,8 @@ expand_env_esc(
 
     }
     *dst = NUL;
+
+    return (size_t)(dst - dst_start);
 }
 
 /*

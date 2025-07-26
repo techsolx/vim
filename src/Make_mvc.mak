@@ -342,7 +342,11 @@ MSVCRT_NAME = vcruntime$(MSVCRT_VER)
 
 ### Set the default $(WINVER) to make it work with Windows 7
 !ifndef WINVER
+! if "$(CPU)" == "ARM64"
+WINVER = 0x0A00
+! else
 WINVER = 0x0601
+! endif
 !endif
 
 # Use multiprocess build
@@ -571,7 +575,8 @@ CPUNR = sse2
 !  error *** ERROR Unknown target architecture "$(CPUNR)". Make aborted.
 ! endif
 !elseif "$(CPU)" == "ARM64"
-# TODO: Validate CPUNR.
+# TODO: Validate CPUNR depending on the VS version.
+CPUNR = armv8.0
 !endif
 
 # Convert processor ID to MVC-compatible number
@@ -779,6 +784,7 @@ OBJ = \
 	$(OUTDIR)\spellsuggest.obj \
 	$(OUTDIR)\strings.obj \
 	$(OUTDIR)\syntax.obj \
+	$(OUTDIR)\tabpanel.obj \
 	$(OUTDIR)\tag.obj \
 	$(OUTDIR)\term.obj \
 	$(OUTDIR)\testing.obj \
@@ -797,6 +803,7 @@ OBJ = \
 	$(OUTDIR)\vim9compile.obj \
 	$(OUTDIR)\vim9execute.obj \
 	$(OUTDIR)\vim9expr.obj \
+	$(OUTDIR)\vim9generics.obj \
 	$(OUTDIR)\vim9instr.obj \
 	$(OUTDIR)\vim9script.obj \
 	$(OUTDIR)\vim9type.obj \
@@ -1778,6 +1785,8 @@ $(OUTDIR)/strings.obj:	$(OUTDIR) strings.c  $(INCL)
 
 $(OUTDIR)/syntax.obj:	$(OUTDIR) syntax.c  $(INCL)
 
+$(OUTDIR)/tabpanel.obj:	$(OUTDIR) tabpanel.c  $(INCL)
+
 $(OUTDIR)/tag.obj:	$(OUTDIR) tag.c  $(INCL)
 
 $(OUTDIR)/term.obj:	$(OUTDIR) term.c  $(INCL)
@@ -1815,6 +1824,8 @@ $(OUTDIR)/vim9compile.obj:	$(OUTDIR) vim9compile.c  $(INCL) vim9.h
 $(OUTDIR)/vim9execute.obj:	$(OUTDIR) vim9execute.c  $(INCL) vim9.h
 
 $(OUTDIR)/vim9expr.obj:	$(OUTDIR) vim9expr.c  $(INCL) vim9.h
+
+$(OUTDIR)/vim9generics.obj:	$(OUTDIR) vim9generics.c  $(INCL) vim9.h
 
 $(OUTDIR)/vim9instr.obj:	$(OUTDIR) vim9instr.c  $(INCL) vim9.h
 
@@ -2001,6 +2012,7 @@ proto.h: \
 	proto/spellsuggest.pro \
 	proto/strings.pro \
 	proto/syntax.pro \
+	proto/tabpanel.pro \
 	proto/tag.pro \
 	proto/term.pro \
 	proto/testing.pro \
@@ -2019,6 +2031,7 @@ proto.h: \
 	proto/vim9compile.pro \
 	proto/vim9execute.pro \
 	proto/vim9expr.pro \
+	proto/vim9generics.pro \
 	proto/vim9instr.pro \
 	proto/vim9script.pro \
 	proto/vim9type.pro \

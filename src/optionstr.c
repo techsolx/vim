@@ -28,9 +28,14 @@ static char *(p_bo_values[]) = {"all", "backspace", "cursor", "complete",
 // Note: Keep this in sync with briopt_check()
 static char *(p_briopt_values[]) = {"shift:", "min:", "sbr", "list:", "column:", NULL};
 #endif
+#if defined(FEAT_TABPANEL)
+// Note: Keep this in sync with tabpanelopt_changed()
+static char *(p_tplo_values[]) = {"align:", "columns:", "vert", NULL};
+static char *(p_tplo_align_values[]) = {"left", "right", NULL};
+#endif
 #if defined(FEAT_DIFF)
 // Note: Keep this in sync with diffopt_changed()
-static char *(p_dip_values[]) = {"filler", "context:", "iblank", "icase", "iwhite", "iwhiteall", "iwhiteeol", "horizontal", "vertical", "closeoff", "hiddenoff", "foldcolumn:", "followwrap", "internal", "indent-heuristic", "algorithm:", "inline:", "linematch:", NULL};
+static char *(p_dip_values[]) = {"filler", "anchor", "context:", "iblank", "icase", "iwhite", "iwhiteall", "iwhiteeol", "horizontal", "vertical", "closeoff", "hiddenoff", "foldcolumn:", "followwrap", "internal", "indent-heuristic", "algorithm:", "inline:", "linematch:", NULL};
 static char *(p_dip_algorithm_values[]) = {"myers", "minimal", "patience", "histogram", NULL};
 static char *(p_dip_inline_values[]) = {"none", "simple", "char", "word", NULL};
 #endif
@@ -39,6 +44,8 @@ static char *(p_ff_values[]) = {FF_UNIX, FF_DOS, FF_MAC, NULL};
 #ifdef FEAT_CLIPBOARD
 // Note: Keep this in sync with did_set_clipboard()
 static char *(p_cb_values[]) = {"unnamed", "unnamedplus", "autoselect", "autoselectplus", "autoselectml", "html", "exclude:", NULL};
+// Note: Keep this in sync with get_clipmethod()
+static char *(p_cpm_values[]) = {"wayland", "x11", NULL};
 #endif
 #ifdef FEAT_CRYPT
 static char *(p_cm_values[]) = {"zip", "blowfish", "blowfish2",
@@ -96,7 +103,7 @@ static char *(p_ttym_values[]) = {"xterm", "xterm2", "dec", "netterm", "jsbterm"
 static char *(p_ve_values[]) = {"block", "insert", "all", "onemore", "none", "NONE", NULL};
 // Note: Keep this in sync with check_opt_wim()
 static char *(p_wim_values[]) = {"full", "longest", "list", "lastused", "noselect", NULL};
-static char *(p_wop_values[]) = {"fuzzy", "tagfile", "pum", NULL};
+static char *(p_wop_values[]) = {"fuzzy", "tagfile", "pum", "exacttext", NULL};
 #ifdef FEAT_WAK
 static char *(p_wak_values[]) = {"yes", "menu", "no", NULL};
 #endif
@@ -324,6 +331,7 @@ check_buf_options(buf_T *buf)
     check_string_option(&buf->b_p_keymap);
 #endif
 #ifdef FEAT_QUICKFIX
+    check_string_option(&buf->b_p_gefm);
     check_string_option(&buf->b_p_gp);
     check_string_option(&buf->b_p_mp);
     check_string_option(&buf->b_p_efm);
@@ -333,6 +341,9 @@ check_buf_options(buf_T *buf)
     check_string_option(&buf->b_p_tags);
     check_string_option(&buf->b_p_tc);
     check_string_option(&buf->b_p_dict);
+#ifdef FEAT_DIFF
+    check_string_option(&buf->b_p_dia);
+#endif
     check_string_option(&buf->b_p_tsr);
     check_string_option(&buf->b_p_lw);
     check_string_option(&buf->b_p_bkc);
@@ -1378,6 +1389,23 @@ expand_set_clipboard(optexpand_T *args, int *numMatches, char_u ***matches)
 	    numMatches,
 	    matches);
 }
+
+    char *
+did_set_clipmethod(optset_T *args UNUSED)
+{
+    return choose_clipmethod();
+}
+
+    int
+expand_set_clipmethod(optexpand_T *args, int *numMatches, char_u ***matches)
+{
+    return expand_set_opt_string(
+	    args,
+	    p_cpm_values,
+	    ARRAY_LENGTH(p_cpm_values) - 1,
+	    numMatches,
+	    matches);
+}
 #endif
 
 /*
@@ -1588,10 +1616,10 @@ did_set_complete(optset_T *args)
 	}
 	*buf_ptr = NUL;
 
-	if (vim_strchr((char_u *)".wbuksid]tUfo", *buffer) == NULL)
+	if (vim_strchr((char_u *)".wbuksid]tUFo", *buffer) == NULL)
 	    return illegal_char(args->os_errbuf, args->os_errbuflen, *buffer);
 
-	if (vim_strchr((char_u *)"ksf", *buffer) == NULL && *(buffer + 1) != NUL
+	if (vim_strchr((char_u *)"ksF", *buffer) == NULL && *(buffer + 1) != NUL
 		&& *(buffer + 1) != '^')
 	    char_before = *buffer;
 	else
@@ -1636,7 +1664,7 @@ did_set_complete(optset_T *args)
 expand_set_complete(optexpand_T *args, int *numMatches, char_u ***matches)
 {
     static char *(p_cpt_values[]) = {
-	".", "w", "b", "u", "k", "kspell", "s", "i", "d", "]", "t", "U", "f", "o",
+	".", "w", "b", "u", "k", "kspell", "s", "i", "d", "]", "t", "U", "F", "o",
 	NULL};
     return expand_set_opt_string(
 	    args,
@@ -1864,7 +1892,7 @@ did_set_cryptkey(optset_T *args)
     }
 # ifdef FEAT_SODIUM
     if (crypt_method_is_sodium(crypt_get_method_nr(curbuf)))
-       crypt_sodium_lock_key(args->os_newval.string);
+	crypt_sodium_lock_key(args->os_newval.string);
 # endif
 
     return NULL;
@@ -2022,6 +2050,18 @@ expand_set_debug(optexpand_T *args, int *numMatches, char_u ***matches)
 }
 
 #if defined(FEAT_DIFF) || defined(PROTO)
+/*
+ * The 'diffanchors' option is changed.
+ */
+    char *
+did_set_diffanchors(optset_T *args)
+{
+    if (diffanchors_changed(args->os_flags & OPT_LOCAL) == FAIL)
+	return e_invalid_argument;
+
+    return NULL;
+}
+
 /*
  * The 'diffopt' option is changed.
  */
@@ -2242,11 +2282,18 @@ static int expand_eiw = FALSE;
     static char_u *
 get_eventignore_name(expand_T *xp, int idx)
 {
+    int subtract = *xp->xp_pattern == '-';
     // 'eventignore(win)' allows special keyword "all" in addition to
     // all event names.
-    if (idx == 0)
+    if (!subtract && idx == 0)
 	return (char_u *)"all";
-    return get_event_name_no_group(xp, idx - 1, expand_eiw);
+
+    char_u *name = get_event_name_no_group(xp, idx - 1 + subtract, expand_eiw);
+    if (name == NULL)
+	return NULL;
+
+    sprintf((char *)IObuff, "%s%s", subtract ? "-" : "", name);
+    return IObuff;
 }
 
     int
@@ -3207,9 +3254,20 @@ did_set_mkspellmem(optset_T *args UNUSED)
 did_set_mouse(optset_T *args)
 {
     char_u	**varp = (char_u **)args->os_varp;
+    char	*retval;
 
-    return did_set_option_listflag(*varp, (char_u *)MOUSE_ALL, args->os_errbuf,
+    retval = did_set_option_listflag(*varp, (char_u *)MOUSE_ALL, args->os_errbuf,
 		    args->os_errbuflen);
+    if (retval == NULL)
+    {
+	redraw_tabline = TRUE;
+	if (tabline_height() > 0)
+	    update_screen(UPD_VALID);
+#if (defined(FEAT_PROP_POPUP) && defined(FEAT_QUICKFIX)) || defined(PROTO)
+	popup_close_info(); // Close info popup to apply new properties
+#endif
+    }
+    return retval;
 }
 
     int
@@ -3547,6 +3605,50 @@ did_set_rulerformat(optset_T *args)
 }
 #endif
 
+#if defined(FEAT_TABPANEL)
+/*
+ * Process the new 'tabpanelopt' option value.
+ */
+    char *
+did_set_tabpanelopt(optset_T *args UNUSED)
+{
+    if (tabpanelopt_changed() == FAIL)
+	return e_invalid_argument;
+
+    return NULL;
+}
+
+    int
+expand_set_tabpanelopt(optexpand_T *args, int *numMatches, char_u ***matches)
+{
+    expand_T *xp = args->oe_xp;
+
+    if (xp->xp_pattern > args->oe_set_arg && *(xp->xp_pattern-1) == ':')
+    {
+	// Within "align:", we have a subgroup of possible options.
+	int align_len = (int)STRLEN("align:");
+	if (xp->xp_pattern - args->oe_set_arg >= align_len &&
+		STRNCMP(xp->xp_pattern - align_len, "align:", align_len) == 0)
+	{
+	    return expand_set_opt_string(
+		    args,
+		    p_tplo_align_values,
+		    ARRAY_LENGTH(p_tplo_align_values) - 1,
+		    numMatches,
+		    matches);
+	}
+	return FAIL;
+    }
+
+    return expand_set_opt_string(
+	    args,
+	    p_tplo_values,
+	    ARRAY_LENGTH(p_tplo_values) - 1,
+	    numMatches,
+	    matches);
+}
+#endif
+
 /*
  * The 'scrollopt' option is changed.
  */
@@ -3565,6 +3667,21 @@ expand_set_scrollopt(optexpand_T *args, int *numMatches, char_u ***matches)
 	    ARRAY_LENGTH(p_scbopt_values) - 1,
 	    numMatches,
 	    matches);
+}
+
+/*
+ * The 'wlseat' option is changed
+ */
+    char *
+did_set_wlseat(optset_T *args UNUSED)
+{
+#ifdef FEAT_WAYLAND_CLIPBOARD
+    // If there isn't any seat named 'wlseat', then let the Wayland clipboard be
+    // unavailable. Ignore errors returned.
+    wayland_cb_reload();
+#endif
+
+    return NULL;
 }
 
 /*

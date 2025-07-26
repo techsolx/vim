@@ -231,10 +231,11 @@ typedef enum {
 #define CPO_CHDIR	'.'	// don't chdir if buffer is modified
 #define CPO_SCOLON	';'	// using "," and ";" will skip over char if
 				// cursor would not move
+#define CPO_NOSYMLINKS	'~'	// don't resolve symlinks when changing directory
 // default values for Vim, Vi and POSIX
 #define CPO_VIM		"aABceFsz"
 #define CPO_VI		"aAbBcCdDeEfFgHiIjJkKlLmMnoOpPqrRsStuvwWxXyZz$!%*-+<>;"
-#define CPO_ALL		"aAbBcCdDeEfFgHiIjJkKlLmMnoOpPqrRsStuvwWxXyZz$!%*-+<>#{|&/\\.;"
+#define CPO_ALL		"aAbBcCdDeEfFgHiIjJkKlLmMnoOpPqrRsStuvwWxXyZz$!%*-+<>#{|&/\\.;~"
 
 // characters for p_ww option:
 #define WW_ALL		"bshl<>[]~"
@@ -374,8 +375,9 @@ typedef enum {
 // flags for the 'wildoptions' option
 // each defined char should be unique over all values.
 #define WOP_FUZZY	'z'
-#define WOP_TAGFILE	't'
+#define WOP_TAGFILE	'g'
 #define WOP_PUM		'p'
+#define WOP_EXACTTEXT	'x'
 
 // arguments for can_bs()
 // each defined char should be unique over all values
@@ -504,6 +506,7 @@ EXTERN char_u	*p_cedit;	// 'cedit'
 EXTERN long	p_cwh;		// 'cmdwinheight'
 #ifdef FEAT_CLIPBOARD
 EXTERN char_u	*p_cb;		// 'clipboard'
+EXTERN char_u	*p_cpm;		// 'clipmethod'
 #endif
 EXTERN long	p_ch;		// 'cmdheight'
 #ifdef FEAT_FOLDING
@@ -520,6 +523,7 @@ EXTERN char_u	*p_cia;		// 'completeitemalign'
 EXTERN unsigned cia_flags;	// order flags of 'completeitemalign'
 EXTERN char_u	*p_cot;		// 'completeopt'
 EXTERN unsigned	cot_flags;	// flags from 'completeopt'
+EXTERN int	p_ac;		// 'autocomplete'
 // Keep in sync with p_cot_values in optionstr.c
 #define COT_MENU	0x001
 #define COT_MENUONE	0x002
@@ -568,6 +572,7 @@ EXTERN char_u	*p_def;		// 'define'
 EXTERN char_u	*p_inc;
 #endif
 #ifdef FEAT_DIFF
+EXTERN char_u	*p_dia;		// 'diffanchors'
 EXTERN char_u	*p_dip;		// 'diffopt'
 # ifdef FEAT_EVAL
 EXTERN char_u	*p_dex;		// 'diffexpr'
@@ -789,6 +794,7 @@ EXTERN long	p_mmt;		// 'maxmemtot'
 EXTERN long	p_mis;		// 'menuitems'
 #endif
 EXTERN char_u	*p_mopt;	// 'messagesopt'
+EXTERN long	p_msc;		// 'maxsearchcount'
 #ifdef FEAT_SPELL
 EXTERN char_u	*p_msm;		// 'mkspellmem'
 #endif
@@ -984,7 +990,15 @@ EXTERN unsigned	swb_flags;
 #define SWB_NEWTAB		0x008
 #define SWB_VSPLIT		0x010
 #define SWB_USELAST		0x020
+
 EXTERN char_u	*p_spk;		// 'splitkeep'
+
+#if defined(FEAT_TABPANEL)
+EXTERN char_u	*p_tpl;		// 'tabpanel'
+EXTERN long	p_stpl;		// 'showtabpanel'
+EXTERN char_u	*p_tplo;	// 'tabpanelopt'
+#endif
+
 #ifdef FEAT_SYN_HL
 EXTERN char_u	*p_syn;		// 'syntax'
 #endif
@@ -1124,6 +1138,13 @@ EXTERN long	p_wh;		// 'winheight'
 EXTERN long	p_wmh;		// 'winminheight'
 EXTERN long	p_wmw;		// 'winminwidth'
 EXTERN long	p_wiw;		// 'winwidth'
+#ifdef FEAT_WAYLAND
+EXTERN char_u	*p_wse;		// 'wlseat'
+# ifdef FEAT_WAYLAND_CLIPBOARD
+EXTERN int	p_wst;		// 'wlsteal'
+# endif
+EXTERN long     p_wtm;		// 'wltimeoutlen'
+#endif
 #if defined(MSWIN) && defined(FEAT_TERMINAL)
 EXTERN char_u	*p_winptydll;	// 'winptydll'
 #endif
@@ -1149,6 +1170,7 @@ enum
     , BV_BT
 #ifdef FEAT_QUICKFIX
     , BV_EFM
+    , BV_GEFM
     , BV_GP
     , BV_MP
 #endif
@@ -1169,6 +1191,9 @@ enum
     , BV_COT
     , BV_CPT
     , BV_DICT
+#ifdef FEAT_DIFF
+    , BV_DIA
+#endif
     , BV_TSR
 #ifdef BACKSLASH_IN_FILENAME
     , BV_CSL

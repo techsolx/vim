@@ -2927,14 +2927,16 @@ option_expand(int opt_idx, char_u *val)
 
     /*
      * Expanding this with NameBuff, expand_env() must not be passed IObuff.
-     * Escape spaces when expanding 'tags', they are used to separate file
-     * names.
+     * Escape spaces when expanding 'tags' or 'path', they are used to separate
+     * file names.
      * For 'spellsuggest' expand after "file:".
      */
-    expand_env_esc(val, NameBuff, MAXPATHL,
-	    (char_u **)options[opt_idx].var == &p_tags, FALSE,
+    char_u ** var = (char_u **)options[opt_idx].var;
+    int esc = var == &p_tags || var == &p_path;
+
+    expand_env_esc(val, NameBuff, MAXPATHL, esc, FALSE,
 #ifdef FEAT_SPELL
-	    (char_u **)options[opt_idx].var == &p_sps ? (char_u *)"file:" :
+	    var == &p_sps ? (char_u *)"file:" :
 #endif
 				  NULL);
     if (STRCMP(NameBuff, val) == 0)   // they are the same
@@ -3107,6 +3109,9 @@ redraw_titles(void)
 {
     need_maketitle = TRUE;
     redraw_tabline = TRUE;
+#if defined(FEAT_TABPANEL)
+    redraw_tabpanel = TRUE;
+#endif
 }
 
 /*
@@ -4135,6 +4140,29 @@ did_set_scrollbind(optset_T *args UNUSED)
     return NULL;
 }
 
+/*
+ * Process the new 'maxsearchcount' option value.
+ */
+    char *
+did_set_maxsearchcount(optset_T *args UNUSED)
+{
+    char	*errmsg = NULL;
+// if you increase this, also increase SEARCH_STAT_BUF_LEN in search.c
+#define MAX_SEARCH_COUNT 9999
+
+    if (p_msc <= 0)
+	errmsg = e_argument_must_be_positive;
+    else if (p_msc > MAX_SEARCH_COUNT)
+	errmsg = e_invalid_argument;
+
+    if (errmsg != NULL)
+	p_msc = 99;
+
+    return errmsg;
+#undef MAX_SEARCH_COUNT
+}
+
+
 #if defined(BACKSLASH_IN_FILENAME) || defined(PROTO)
 /*
  * Process the updated 'shellslash' option value.
@@ -4719,6 +4747,36 @@ did_set_winwidth(optset_T *args UNUSED)
 
     return errmsg;
 }
+
+#ifdef FEAT_WAYLAND_CLIPBOARD
+/*
+ * Process the new 'wlsteal' option value.
+ */
+    char *
+did_set_wlsteal(optset_T *args UNUSED)
+{
+    wayland_cb_reload();
+
+    return NULL;
+}
+#endif
+
+#ifdef FEAT_WAYLAND
+/*
+ * Process the new 'wltimeoutlen' option value.
+ */
+    char *
+did_set_wltimeoutlen(optset_T *args)
+{
+    if (p_wtm < 0)
+    {
+	p_wtm = args->os_oldval.number;
+	return e_argument_must_be_positive;
+    }
+
+    return NULL;
+}
+#endif
 
 /*
  * Process the updated 'wrap' option value.
@@ -6406,6 +6464,11 @@ unset_global_local_option(char_u *name, void *from)
 	case PV_DICT:
 	    clear_string_option(&buf->b_p_dict);
 	    break;
+# ifdef FEAT_DIFF
+	case PV_DIA:
+	    clear_string_option(&buf->b_p_dia);
+	    break;
+# endif
 	case PV_TSR:
 	    clear_string_option(&buf->b_p_tsr);
 	    break;
@@ -6425,6 +6488,9 @@ unset_global_local_option(char_u *name, void *from)
 # ifdef FEAT_QUICKFIX
 	case PV_EFM:
 	    clear_string_option(&buf->b_p_efm);
+	    break;
+	case PV_GEFM:
+	    clear_string_option(&buf->b_p_gefm);
 	    break;
 	case PV_GP:
 	    clear_string_option(&buf->b_p_gp);
@@ -6505,6 +6571,7 @@ get_varp_scope(struct vimoption *p, int scope)
 #endif
 #ifdef FEAT_QUICKFIX
 	    case PV_EFM:  return (char_u *)&(curbuf->b_p_efm);
+	    case PV_GEFM: return (char_u *)&(curbuf->b_p_gefm);
 	    case PV_GP:   return (char_u *)&(curbuf->b_p_gp);
 	    case PV_MP:   return (char_u *)&(curbuf->b_p_mp);
 #endif
@@ -6523,6 +6590,9 @@ get_varp_scope(struct vimoption *p, int scope)
 	    case PV_COT:  return (char_u *)&(curbuf->b_p_cot);
 	    case PV_ISE:  return (char_u *)&(curbuf->b_p_ise);
 	    case PV_DICT: return (char_u *)&(curbuf->b_p_dict);
+#ifdef FEAT_DIFF
+	    case PV_DIA:  return (char_u *)&(curbuf->b_p_dia);
+#endif
 	    case PV_TSR:  return (char_u *)&(curbuf->b_p_tsr);
 #ifdef FEAT_COMPL_FUNC
 	    case PV_TSRFU: return (char_u *)&(curbuf->b_p_tsrfu);
@@ -6608,6 +6678,10 @@ get_varp(struct vimoption *p)
 				    ? (char_u *)&(curbuf->b_p_ise) : p->var;
 	case PV_DICT:	return *curbuf->b_p_dict != NUL
 				    ? (char_u *)&(curbuf->b_p_dict) : p->var;
+#ifdef FEAT_DIFF
+	case PV_DIA:	return *curbuf->b_p_dia != NUL
+				    ? (char_u *)&(curbuf->b_p_dia) : p->var;
+#endif
 	case PV_TSR:	return *curbuf->b_p_tsr != NUL
 				    ? (char_u *)&(curbuf->b_p_tsr) : p->var;
 #ifdef FEAT_COMPL_FUNC
@@ -6623,6 +6697,8 @@ get_varp(struct vimoption *p)
 #ifdef FEAT_QUICKFIX
 	case PV_EFM:	return *curbuf->b_p_efm != NUL
 				    ? (char_u *)&(curbuf->b_p_efm) : p->var;
+	case PV_GEFM:	return *curbuf->b_p_gefm != NUL
+				    ? (char_u *)&(curbuf->b_p_gefm) : p->var;
 	case PV_GP:	return *curbuf->b_p_gp != NUL
 				    ? (char_u *)&(curbuf->b_p_gp) : p->var;
 	case PV_MP:	return *curbuf->b_p_mp != NUL
@@ -7412,6 +7488,7 @@ buf_copy_options(buf_T *buf, int flags)
 	    buf->b_p_bkc = empty_option;
 	    buf->b_bkc_flags = 0;
 #ifdef FEAT_QUICKFIX
+	    buf->b_p_gefm = empty_option;
 	    buf->b_p_gp = empty_option;
 	    buf->b_p_mp = empty_option;
 	    buf->b_p_efm = empty_option;
@@ -7436,6 +7513,9 @@ buf_copy_options(buf_T *buf, int flags)
 	    buf->b_p_cot = empty_option;
 	    buf->b_cot_flags = 0;
 	    buf->b_p_dict = empty_option;
+#ifdef FEAT_DIFF
+	    buf->b_p_dia = empty_option;
+#endif
 	    buf->b_p_tsr = empty_option;
 	    buf->b_p_ise = empty_option;
 #ifdef FEAT_COMPL_FUNC
@@ -8831,6 +8911,18 @@ option_set_callback_func(char_u *optval UNUSED, callback_T *optcb UNUSED)
     return FAIL;
 #endif
 }
+
+#if defined(FEAT_TABPANEL)
+/*
+ * Process the new 'showtabpanel' option value.
+ */
+    char *
+did_set_showtabpanel(optset_T *args UNUSED)
+{
+    shell_new_columns();
+    return NULL;
+}
+#endif
 
 #if defined(FEAT_EVAL) || defined(PROTO)
     static void

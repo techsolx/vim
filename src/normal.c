@@ -4059,7 +4059,7 @@ nv_gotofile(cmdarg_T *cap)
 #endif
 
     if (!check_can_set_curbuf_disabled())
-      return;
+	return;
 
     ptr = grab_file_name(cap->count1, &lnum);
 
@@ -5675,9 +5675,6 @@ nv_gv_cmd(cmdarg_T *cap)
 {
     pos_T	tpos;
     int		i;
-
-    if (checkclearop(cap->oap))
-	return;
 
     if (curbuf->b_visual.vi_start.lnum == 0
 	    || curbuf->b_visual.vi_start.lnum > curbuf->b_ml.ml_line_count
