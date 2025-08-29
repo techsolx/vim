@@ -267,25 +267,31 @@ func Test_complete()
   new
   call feedkeys("i\<C-N>\<Esc>", 'xt')
   bwipe!
-  call assert_fails('set complete=ix', 'E535:')
-  call assert_fails('set complete=x', 'E539:')
-  call assert_fails('set complete=..', 'E535:')
+  call assert_fails('set complete=ix', 'E535: Illegal character after <i>')
+  call assert_fails('set complete=x', 'E539: Illegal character <x>')
+  call assert_fails('set complete=..', 'E535: Illegal character after <.>')
   set complete=.,w,b,u,k,\ s,i,d,],t,U,F,o
-  call assert_fails('set complete=i^-10', 'E535:')
-  call assert_fails('set complete=i^x', 'E535:')
-  call assert_fails('set complete=k^2,t^-1,s^', 'E535:')
-  call assert_fails('set complete=t^-1', 'E535:')
-  call assert_fails('set complete=kfoo^foo2', 'E535:')
-  call assert_fails('set complete=kfoo^', 'E535:')
-  call assert_fails('set complete=.^', 'E535:')
+  call assert_fails('set complete=i^-10', 'E535: Illegal character after <^>')
+  call assert_fails('set complete=i^x', 'E535: Illegal character after <^>')
+  call assert_fails('set complete=k^2,t^-1,s^', 'E535: Illegal character after <^>')
+  call assert_fails('set complete=t^-1', 'E535: Illegal character after <^>')
+  call assert_fails('set complete=kfoo^foo2', 'E535: Illegal character after <^>')
+  call assert_fails('set complete=kfoo^', 'E535: Illegal character after <^>')
+  call assert_fails('set complete=.^', 'E535: Illegal character after <^>')
   set complete=.,w,b,u,k,s,i,d,],t,U,F,o
   set complete=.
   set complete=.^10,t^0
-  set complete+=Ffuncref('foo'\\,\ [10])
-  set complete=Ffuncref('foo'\\,\ [10])^10
+
+  func Foo(a, b)
+    return ''
+  endfunc
+
+  set complete+=Ffuncref('Foo'\\,\ [10])
+  set complete=Ffuncref('Foo'\\,\ [10])^10
   set complete&
-  set complete+=Ffunction('g:foo'\\,\ [10\\,\ 20])
+  set complete+=Ffunction('g:Foo'\\,\ [10\\,\ 20])
   set complete&
+  delfunc Foo
 endfun
 
 func Test_set_completion()
@@ -523,7 +529,7 @@ func Test_set_completion_string_values()
     if has('unix') || has('vms')
       call assert_match('wayland', getcompletion('set clipmethod=', 'cmdline')[1])
     else
-      call assert_match('wayland', getcompletion('set clipmethod=', 'cmdline')[0])
+      call assert_match('gui', getcompletion('set clipmethod=', 'cmdline')[0])
     endif
   endif
   call assert_equal('.', getcompletion('set complete=', 'cmdline')[1])

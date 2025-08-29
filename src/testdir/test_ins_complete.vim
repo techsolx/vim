@@ -198,6 +198,10 @@ func Test_omni_autoload()
   setlocal omnifunc=omni#Func
   call feedkeys("i\<C-X>\<C-O>\<Esc>", 'xt')
 
+  setlocal complete=.,Fomni#Func
+  call feedkeys("S\<C-N>\<Esc>", 'xt')
+  setlocal complete&
+
   bwipe!
   set omnifunc=
   let &rtp = save_rtp
@@ -2692,6 +2696,15 @@ func Test_omnifunc_callback()
   call assert_equal([[1, ''], [0, 'script1']], g:OmniFunc3Args)
   bw!
 
+  set complete=Fs:OmniFunc3
+  new
+  call setline(1, 'script1')
+  let g:OmniFunc3Args = []
+  call feedkeys("A\<C-N>\<Esc>", 'x')
+  call assert_equal([[1, ''], [0, 'script1']], g:OmniFunc3Args)
+  bw!
+  set complete&
+
   let &omnifunc = 's:OmniFunc3'
   new
   call setline(1, 'script2')
@@ -3208,6 +3221,35 @@ func Test_tagfunc_wipes_out_buffer()
   bwipe!
 endfunc
 
+func s:TagfuncComplete(t,f,o)
+  call complete(1, ['ddd', 'eee', 'fff'])
+  return []
+endfunc
+
+" 'tagfunc' calling complete() should not cause hang or E684.
+func Test_tagfunc_calls_complete()
+  new
+  call setline(1, ['aaa', 'bbb', 'ccc'])
+  setlocal tagfunc=s:TagfuncComplete
+  setlocal completeopt=menu,noselect
+
+  let v:errmsg = ''
+
+  " This used to hang.
+  setlocal complete=.,t
+  call feedkeys("Go\<C-N>\<C-E>\<Esc>", 'tx')
+  call assert_equal('', getline('.'))
+  call assert_equal('', v:errmsg)
+
+  " This used to cause E684.
+  setlocal complete=t,.
+  call feedkeys("cc\<C-N>\<C-E>\<Esc>", 'tx')
+  call assert_equal('', getline('.'))
+  call assert_equal('', v:errmsg)
+
+  bwipe!
+endfunc
+
 func Test_ins_complete_popup_position()
   CheckScreendump
 
@@ -3478,7 +3520,7 @@ func Test_complete_opt_fuzzy()
   set cot+=noinsert
   call feedkeys("i\<C-R>=CompAnother()\<CR>f", 'tx')
   call assert_equal("for", g:abbr)
-  call assert_equal(0, g:selected)
+  call assert_equal(2, g:selected)
 
   set cot=menu,menuone,noselect,fuzzy
   call feedkeys("i\<C-R>=CompAnother()\<CR>\<C-N>\<C-N>\<C-N>\<C-N>", 'tx')
@@ -3862,6 +3904,27 @@ func Test_complete_info_completed()
   set cot&
 endfunc
 
+func Test_complete_info_selected()
+  set completeopt=menuone,noselect
+  new
+  call setline(1, ["ward", "werd", "wurd", "wxrd"])
+
+  exe "normal! Gow\<c-n>u\<c-n>\<c-r>=complete_info().selected\<cr>"
+  call assert_equal('wurd2', getline(5))
+
+  exe "normal! Sw\<c-n>u\<c-n>\<c-r>=complete_info(['selected']).selected\<cr>"
+  call assert_equal('wurd2', getline(5))
+
+  exe "normal! Sw\<c-n>u\<c-n>\<c-r>=complete_info(['items', 'selected']).selected\<cr>"
+  call assert_equal('wurd2', getline(5))
+
+  exe "normal! Sw\<c-n>u\<c-n>\<c-r>=complete_info(['matches', 'selected']).selected\<cr>"
+  call assert_equal('wurd0', getline(5))
+
+  bw!
+  set cot&
+endfunc
+
 func Test_completeopt_preinsert()
   func Omni_test(findstart, base)
     if a:findstart
@@ -3882,7 +3945,7 @@ func Test_completeopt_preinsert()
   call assert_equal("fobar", g:line)
   call assert_equal(2, g:col)
 
-  call feedkeys("S\<C-X>\<C-O>foo\<F5><ESC>", 'tx')
+  call feedkeys("S\<C-X>\<C-O>foo\<F5>\<ESC>", 'tx')
   call assert_equal("foobar", g:line)
 
   call feedkeys("S\<C-X>\<C-O>foo\<BS>\<BS>\<BS>", 'tx')
@@ -5025,7 +5088,7 @@ func Test_autocomplete_trigger()
 
   new
   inoremap <buffer> <F2> <Cmd>let b:matches = complete_info(["matches"]).matches<CR>
-  inoremap <buffer> <F3> <Cmd>let b:selected = complete_info(["selected"]).selected<CR>
+  inoremap <buffer> <F3> <Cmd>let b:selected = complete_info(["matches", "selected"]).selected<CR>
 
   call setline(1, ['abc', 'abcd', 'fo', 'b', ''])
   set autocomplete
@@ -5136,7 +5199,7 @@ func Test_autocomplete_trigger()
 
   " Test 4a: When autocomplete menu is active, ^X^N completes buffer keywords
   let g:CallCount = 0
-  call feedkeys("S#a\<C-X>\<C-N>\<F2>\<Esc>0", 'tx!')
+  call feedkeys("S#a\<C-E>\<C-X>\<C-N>\<F2>\<Esc>0", 'tx!')
   call assert_equal(['abc', 'abcd'], b:matches->mapnew('v:val.word'))
   call assert_equal(2, g:CallCount)
 
@@ -5162,6 +5225,14 @@ func Test_autocomplete_trigger()
   call feedkeys("Goa\<C-X>\<C-L>\<F2>\<Esc>0", 'tx!')
   call assert_equal(['afoo bar', 'and'], b:matches->mapnew('v:val.word'))
   call assert_equal(1, g:CallCount)
+
+  " Issue #18044
+  %d
+  call setline(1, ["first line", "second line"])
+  call feedkeys("Gof\<C-X>\<C-L>\<Esc>", 'tx!')
+  call assert_equal("first line", getline(3))
+  call feedkeys("Sf\<C-X>\<C-L>\<C-X>\<C-L>\<Esc>", 'tx!')
+  call assert_equal("second line", getline(4))
 
   " Test 5: When invalid prefix stops completion, backspace should restart it
   %d
@@ -5321,6 +5392,190 @@ func Test_autocomplete_timer()
   delfunc TestComplete
   set autocomplete& complete&
   unlet g:CallCount
+endfunc
+
+func s:TestCompleteScriptLocal(findstart, base)
+  if a:findstart
+    return 1
+  else
+    return ['foo', 'foobar']
+  endif
+endfunc
+
+" Issue 17869
+func Test_scriptlocal_autoload_func()
+  let save_rtp = &rtp
+  set rtp=Xruntime/some
+  let dir = 'Xruntime/some/autoload'
+  call mkdir(dir, 'pR')
+
+  let lines =<< trim END
+      vim9script
+      export def Func(findstart: bool, base: string): any
+          if findstart
+              return 1
+          else
+              return ['match', 'matchfoo']
+          endif
+      enddef
+  END
+  call writefile(lines, dir .. '/compl.vim')
+
+  call test_override("char_avail", 1)
+  new
+  inoremap <buffer> <F2> <Cmd>let b:matches = complete_info(["matches"]).matches<CR>
+  set autocomplete
+
+  setlocal complete=.,Fcompl#Func
+  call feedkeys("im\<F2>\<Esc>0", 'xt!')
+  call assert_equal(['match', 'matchfoo'], b:matches->mapnew('v:val.word'))
+
+  setlocal complete=.,F<SID>TestCompleteScriptLocal
+  call feedkeys("Sf\<F2>\<Esc>0", 'xt!')
+  call assert_equal(['foo', 'foobar'], b:matches->mapnew('v:val.word'))
+
+  setlocal complete&
+  set autocomplete&
+  bwipe!
+  call test_override("char_avail", 0)
+  let &rtp = save_rtp
+endfunc
+
+" Issue #17907
+func Test_omni_start_invalid_col()
+  func OmniFunc(startcol, findstart, base)
+    if a:findstart
+      return a:startcol
+    else
+      return ['foo', 'foobar']
+    endif
+  endfunc
+
+  new
+  set complete=o
+  set omnifunc=funcref('OmniFunc',\ [-1])
+  call setline(1, ['baz '])
+  call feedkeys("A\<C-N>\<Esc>0", 'tx!')
+  call assert_equal('baz foo', getline(1))
+
+  set omnifunc=funcref('OmniFunc',\ [1000])
+  call setline(1, ['bar '])
+  call feedkeys("A\<C-N>\<Esc>0", 'tx!')
+  call assert_equal('bar foo', getline(1))
+  bw!
+
+  delfunc OmniFunc
+  set omnifunc& complete&
+endfunc
+
+func Test_completetimeout_autocompletetimeout()
+  func OmniFunc(findstart, base)
+    if a:findstart
+      return 1
+    else
+      return ['fooOmni']
+    endif
+  endfunc
+
+  set omnifunc=OmniFunc
+  call test_override("char_avail", 1)
+  inoremap <F2> <Cmd>let b:matches = complete_info(["matches"]).matches<CR>
+
+  call setline(1, ['foobar', 'foobarbaz'])
+  new
+  call setline(1, ['foo', 'foobaz', ''])
+  set complete=.,o,w
+  call feedkeys("G", 'xt!')
+
+  set autocomplete
+  for tt in [1, 80, 1000, -1, 0]
+    exec $'set autocompletetimeout={tt}'
+    call feedkeys("\<Esc>Sf\<F2>\<Esc>0", 'xt!')
+    call assert_equal(['foobaz', 'foo', 'fooOmni', 'foobar', 'foobarbaz'], b:matches->mapnew('v:val.word'))
+  endfor
+  set autocomplete&
+
+  for tt in [80, 1000, -1, 0]
+    exec $'set completetimeout={tt}'
+    call feedkeys("\<Esc>Sf\<C-N>\<F2>\<Esc>0", 'xt!')
+    call assert_equal(['foo', 'foobaz', 'fooOmni', 'foobar', 'foobarbaz'], b:matches->mapnew('v:val.word'))
+  endfor
+
+  " Clock does not have fine granularity, so checking 'elapsed time' is only
+  " approximate. We can only test that some type of timeout is enforced.
+  call setline(1, map(range(60000), '"foo" . v:val'))
+  set completetimeout=1
+  call feedkeys("Gof\<C-N>\<F2>\<Esc>0", 'xt!')
+  let match_count = len(b:matches->mapnew('v:val.word'))
+  call assert_true(match_count < 2000)
+
+  set completetimeout=1000
+  call feedkeys("\<Esc>Sf\<C-N>\<F2>\<Esc>0", 'xt!')
+  let match_count = len(b:matches->mapnew('v:val.word'))
+  call assert_true(match_count > 2000)
+
+  set autocomplete
+  set autocompletetimeout=81
+  call feedkeys("\<Esc>Sf\<F2>\<Esc>0", 'xt!')
+  let match_count = len(b:matches->mapnew('v:val.word'))
+  call assert_true(match_count < 50000)
+
+  set complete& omnifunc& autocomplete& autocompletetimeout& completetimeout&
+  bwipe!
+  %d
+  call test_override("char_avail", 0)
+  iunmap <F2>
+  delfunc OmniFunc
+endfunc
+
+func Test_autocompletedelay()
+  CheckScreendump
+
+  let lines =<< trim [SCRIPT]
+    call setline(1, ['foo', 'foobar', 'foobarbaz'])
+    set autocomplete
+  [SCRIPT]
+  call writefile(lines, 'XTest_autocomplete_delay', 'D')
+  let buf = RunVimInTerminal('-S XTest_autocomplete_delay', {'rows': 10})
+
+  call term_sendkeys(buf, "Gof")
+  call VerifyScreenDump(buf, 'Test_autocompletedelay_1', {})
+
+  call term_sendkeys(buf, "\<Esc>:set autocompletedelay=500\<CR>")
+  call term_sendkeys(buf, "Sf")
+  call VerifyScreenDump(buf, 'Test_autocompletedelay_2', {})
+  call term_sendkeys(buf, "o")
+  call VerifyScreenDump(buf, 'Test_autocompletedelay_3', {})
+  sleep 500m
+  call VerifyScreenDump(buf, 'Test_autocompletedelay_4', {})
+  call term_sendkeys(buf, "\<BS>")
+  call VerifyScreenDump(buf, 'Test_autocompletedelay_5', {})
+  sleep 500m
+  call VerifyScreenDump(buf, 'Test_autocompletedelay_6', {})
+
+  " During delay wait, user can open menu using CTRL_N completion
+  call term_sendkeys(buf, "\<Esc>:set completeopt=menuone,preinsert\<CR>")
+  call term_sendkeys(buf, "Sf\<C-N>")
+  call VerifyScreenDump(buf, 'Test_autocompletedelay_7', {})
+
+  " After the menu is open, ^N/^P and Up/Down should not delay
+  call term_sendkeys(buf, "\<Esc>:set completeopt=menu noruler\<CR>")
+  call term_sendkeys(buf, "\<Esc>Sf")
+  sleep 500ms
+  call term_sendkeys(buf, "\<C-N>")
+  call VerifyScreenDump(buf, 'Test_autocompletedelay_8', {})
+  call term_sendkeys(buf, "\<Down>")
+  call VerifyScreenDump(buf, 'Test_autocompletedelay_9', {})
+
+  " When menu is not open Up/Down moves cursor to different line
+  call term_sendkeys(buf, "\<Esc>Sf")
+  call term_sendkeys(buf, "\<Up>")
+  call VerifyScreenDump(buf, 'Test_autocompletedelay_10', {})
+  call term_sendkeys(buf, "\<Down>")
+  call VerifyScreenDump(buf, 'Test_autocompletedelay_11', {})
+
+  call term_sendkeys(buf, "\<esc>")
+  call StopVimInTerminal(buf)
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab nofoldenable

@@ -1,15 +1,19 @@
-" Maintainer: Luca Saccarola <github.e41mv@aleeas.com>
-" Former Maintainer: Charles E Campbell
-" Upstream: <https://github.com/saccarosium/netrw.vim>
-" Copyright:    Copyright (C) 2016 Charles E. Campbell {{{1
-"               Permission is hereby granted to use and distribute this code,
-"               with or without modifications, provided that this copyright
-"               notice is copied with it. Like anything else that's free,
-"               netrw.vim, netrwPlugin.vim, and netrwSettings.vim are provided
-"               *as is* and come with no warranty of any kind, either
-"               expressed or implied. By using this plugin, you agree that
-"               in no event will the copyright holder be liable for any damages
-"               resulting from the use of this software.
+" Creator:    Charles E Campbell
+" Previous Maintainer: Luca Saccarola <github.e41mv@aleeas.com>
+" Maintainer: This runtime file is looking for a new maintainer.
+" Last Change:
+" 2025 Aug 07 by Vim Project (use correct "=~#" for netrw_stylesize option #17901)
+" 2025 Aug 07 by Vim Project (netrw#BrowseX() distinguishes remote files #17794)
+" 2025 Aug 22 by Vim Project netrw#Explore handle terminal correctly #18069
+" Copyright:  Copyright (C) 2016 Charles E. Campbell {{{1
+"             Permission is hereby granted to use and distribute this code,
+"             with or without modifications, provided that this copyright
+"             notice is copied with it. Like anything else that's free,
+"             netrw.vim, netrwPlugin.vim, and netrwSettings.vim are provided
+"             *as is* and come with no warranty of any kind, either
+"             expressed or implied. By using this plugin, you agree that
+"             in no event will the copyright holder be liable for any damages
+"             resulting from the use of this software.
 "
 " Note: the code here was started in 1999 under a much earlier version of vim.  The directory browsing
 "       code was written using vim v6, which did not have Lists (Lists were first offered with vim-v7).
@@ -427,9 +431,12 @@ function netrw#Explore(indx,dosplit,style,...)
 
   " record current directory
   let curdir     = simplify(b:netrw_curdir)
-  let curfiledir = substitute(expand("%:p"),'^\(.*[/\\]\)[^/\\]*$','\1','e')
   if !exists("g:netrw_cygwin") && has("win32")
     let curdir= substitute(curdir,'\','/','g')
+  endif
+  let curfiledir = substitute(expand("%:p"),'^\(.*[/\\]\)[^/\\]*$','\1','e')
+  if &buftype == "terminal"
+      let curfiledir = curdir
   endif
 
   " using completion, directories with spaces in their names (thanks, Bill Gates, for a truly dumb idea)
@@ -453,9 +460,9 @@ function netrw#Explore(indx,dosplit,style,...)
   sil! let keepregslash= @/
 
   " if   dosplit
-  " -or- file has been modified AND file not hidden when abandoned
+  " -or- buffer is not a terminal AND file has been modified AND file not hidden when abandoned
   " -or- Texplore used
-  if a:dosplit || (&modified && &hidden == 0 && &bufhidden != "hide") || a:style == 6
+  if a:dosplit || (&buftype != "terminal" && &modified && &hidden == 0 && &bufhidden != "hide") || a:style == 6
     call s:SaveWinVars()
     let winsz= g:netrw_winsize
     if a:indx > 0
@@ -4123,7 +4130,7 @@ function s:NetrwBrowseUpDir(islocal)
 endfunction
 
 " netrw#BrowseX:  (implements "x") executes a special "viewer" script or program for the {{{2
-"              given filename; typically this means given their extension.
+"                 given filename; typically this means given their extension.
 function netrw#BrowseX(fname)
     " special core dump handler
     if a:fname =~ '/core\(\.\d\+\)\=$' && exists("g:Netrw_corehandler")
@@ -4147,7 +4154,12 @@ function netrw#BrowseX(fname)
         let fname = substitute(fname, '^\~', expand("$HOME"), '')
     endif
 
-    call netrw#os#Open(s:NetrwFile(fname))
+    if fname =~ '^[a-z]\+://'
+        " open a remote file
+        call netrw#os#Open(fname)
+    else
+        call netrw#os#Open(s:NetrwFile(fname))
+    endif
 endfunction
 
 " s:NetrwBufRename: renames a buffer without the side effect of retaining an unlisted buffer having the old name {{{2
@@ -9225,7 +9237,7 @@ endfunction
 "                       1000 -> 1K, 1000000 -> 1M, 1000000000 -> 1G
 function s:NetrwHumanReadable(sz)
 
-    if g:netrw_sizestyle == 'h'
+    if g:netrw_sizestyle ==# 'h'
         if a:sz >= 1000000000
             let sz = printf("%.1f",a:sz/1000000000.0)."g"
         elseif a:sz >= 10000000
@@ -9240,7 +9252,7 @@ function s:NetrwHumanReadable(sz)
             let sz= a:sz
         endif
 
-    elseif g:netrw_sizestyle == 'H'
+    elseif g:netrw_sizestyle ==# 'H'
         if a:sz >= 1073741824
             let sz = printf("%.1f",a:sz/1073741824.0)."G"
         elseif a:sz >= 10485760

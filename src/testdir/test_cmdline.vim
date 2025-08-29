@@ -2267,8 +2267,11 @@ func Wildmode_tests()
   " when using longest completion match, matches shorter than the argument
   " should be ignored (happens with :help)
   set wildmode=longest,full
-  call feedkeys(":help a*\t\<C-B>\"\<CR>", 'xt')
-  call assert_equal('"help a', @:)
+  " XXX: This test is incorrect.  ':help a*' will never yield 'help a'
+  "   because '`a' exists as a menu item.  The intent was to test a case
+  "   handled by nextwild().
+  " call feedkeys(":help a*\t\<C-B>\"\<CR>", 'xt')
+  " call assert_equal('"help a', @:)
   " non existing file
   call feedkeys(":e a1b2y3z4\t\<C-B>\"\<CR>", 'xt')
   call assert_equal('"e a1b2y3z4', @:)
@@ -3053,6 +3056,14 @@ func Test_wildmenu_pum_rightleft()
   call term_sendkeys(buf, ":sign \<Tab>")
   call VerifyScreenDump(buf, 'Test_wildmenu_pum_rl', {})
 
+  " Behavior is the same when using 'keymap'.
+  call term_sendkeys(buf, "\<Esc>:set keymap=dvorak\<CR>")
+  call TermWait(buf)
+  " ";gul" -> "sign" when using Dvorak keymap.
+  call term_sendkeys(buf, ":\<C-^>;gul \<Tab>")
+  call VerifyScreenDump(buf, 'Test_wildmenu_pum_rl', {})
+  call term_sendkeys(buf, "\<Esc>:set keymap&\<CR>")
+
   call StopVimInTerminal(buf)
 endfunc
 
@@ -3104,6 +3115,62 @@ func Test_wildmenu_pum_hl_match()
   call VerifyScreenDump(buf, 'Test_wildmenu_pum_hl_match_5', {})
   call term_sendkeys(buf, "\<Tab>")
   call VerifyScreenDump(buf, 'Test_wildmenu_pum_hl_match_6', {})
+  call term_sendkeys(buf, "\<Esc>")
+
+  call StopVimInTerminal(buf)
+endfunc
+
+" Test highlighting of matched text in cmdline completion popup menu provided
+" by a command completed with customlist.
+func Test_wildmenu_pum_hl_match_list()
+  CheckScreendump
+
+  let lines =<< trim END
+    set wildoptions=pum,fuzzy
+    hi PmenuMatchSel  cterm=reverse
+    hi PmenuMatch     cterm=reverse
+    command -nargs=1 -complete=customlist,ListComplete ListT echo <q-args>
+    func ListComplete(A, B, C)
+      return ['hello/world', 'hello/wonderful']->matchfuzzy(a:A)
+    endfunc
+  END
+  call writefile(lines, 'Xwildmenu_pum_hl', 'D')
+  let buf = RunVimInTerminal('-S Xwildmenu_pum_hl', #{rows: 10, cols: 50})
+
+  call term_sendkeys(buf, ":ListT hewo\<Tab>")
+  call VerifyScreenDump(buf, 'Test_wildmenu_pum_hl_match_list_1', {})
+  call term_sendkeys(buf, "\<Esc>:set wildoptions-=fuzzy\<CR>")
+  call TermWait(buf)
+  call term_sendkeys(buf, ":ListT hewo\<Tab>")
+  call VerifyScreenDump(buf, 'Test_wildmenu_pum_hl_match_list_2', {})
+  call term_sendkeys(buf, "\<Esc>")
+
+  call StopVimInTerminal(buf)
+endfunc
+
+" Test highlighting of matched text in cmdline completion popup menu provided
+" by a custom 'findfunc'
+func Test_wildmenu_pum_hl_match_findfunc()
+  CheckScreendump
+
+  let lines =<< trim END
+    set wildoptions=pum,fuzzy
+    hi PmenuMatchSel  cterm=reverse
+    hi PmenuMatch     cterm=reverse
+    func FindComplete(cmdarg, cmdcomplete)
+      return ['hello/world', 'hello/wonderful']->matchfuzzy(a:cmdarg)
+    endfunc
+    set findfunc=FindComplete
+  END
+  call writefile(lines, 'Xwildmenu_pum_hl', 'D')
+  let buf = RunVimInTerminal('-S Xwildmenu_pum_hl', #{rows: 10, cols: 50})
+
+  call term_sendkeys(buf, ":find hewo\<Tab>")
+  call VerifyScreenDump(buf, 'Test_wildmenu_pum_hl_match_find_1', {})
+  call term_sendkeys(buf, "\<Esc>:set wildoptions-=fuzzy\<CR>")
+  call TermWait(buf)
+  call term_sendkeys(buf, ":find hewo\<Tab>")
+  call VerifyScreenDump(buf, 'Test_wildmenu_pum_hl_match_find_2', {})
   call term_sendkeys(buf, "\<Esc>")
 
   call StopVimInTerminal(buf)
@@ -3212,10 +3279,10 @@ func Test_fuzzy_completion_bufname_fullpath()
   edit Xcmd/Xstate/Xfile.js
   cd Xcmd/Xstate
   enew
-  call feedkeys(":b CmdStateFile\<Tab>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"b CmdStateFile', @:)
+  call feedkeys(":b cmdstatefile\<Tab>\<C-B>\"\<CR>", 'tx')
+  call assert_equal('"b cmdstatefile', @:)
   set wildoptions=fuzzy
-  call feedkeys(":b CmdStateFile\<Tab>\<C-B>\"\<CR>", 'tx')
+  call feedkeys(":b cmdstatefile\<Tab>\<C-B>\"\<CR>", 'tx')
   call assert_match('Xcmd/Xstate/Xfile.js$', @:)
   cd -
   set wildoptions&
@@ -3494,7 +3561,7 @@ func Test_fuzzy_completion_mapname()
   nmap <Plug>state :
   nmap <Plug>FendingOff :
   call feedkeys(":nmap <Plug>fo\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal("\"nmap <Plug>format <Plug>TestFOrmat <Plug>FendingOff <Plug>goformat <Plug>fendoff", @:)
+  call assert_equal("\"nmap <Plug>format <Plug>TestFOrmat <Plug>FendingOff <Plug>fendoff <Plug>goformat", @:)
   nunmap <Plug>format
   nunmap <Plug>goformat
   nunmap <Plug>TestFOrmat
@@ -3666,7 +3733,7 @@ func Test_fuzzy_completion_cmd_sort_results()
   command T123FendingOff :
   set wildoptions=fuzzy
   call feedkeys(":T123fo\<C-A>\<C-B>\"\<CR>", 'tx')
-  call assert_equal('"T123format T123TestFOrmat T123FendingOff T123goformat T123fendoff', @:)
+  call assert_equal('"T123format T123TestFOrmat T123FendingOff T123fendoff T123goformat', @:)
   delcommand T123format
   delcommand T123goformat
   delcommand T123TestFOrmat
@@ -4343,7 +4410,7 @@ func Test_cmdcomplete_info()
     call feedkeys(":h echom\<cr>", "tx") " No expansion
     call assert_equal('{}', g:cmdcomplete_info)
     call feedkeys($":h echoms{trig}\<cr>", "tx")
-    call assert_equal('{''cmdline_orig'': '''', ''pum_visible'': 0, ''matches'': [], ''selected'': 0}', g:cmdcomplete_info)
+    call assert_equal('{''cmdline_orig'': ''h echoms'', ''pum_visible'': 0, ''matches'': [], ''selected'': 0}', g:cmdcomplete_info)
     call feedkeys($":h echom{trig}\<cr>", "tx")
     call assert_equal(
           \ '{''cmdline_orig'': ''h echom'', ''pum_visible'': 0, ''matches'': ['':echom'', '':echomsg''], ''selected'': 0}',
@@ -4359,7 +4426,7 @@ func Test_cmdcomplete_info()
 
     set wildoptions=pum
     call feedkeys($":h echoms{trig}\<cr>", "tx")
-    call assert_equal('{''cmdline_orig'': '''', ''pum_visible'': 0, ''matches'': [], ''selected'': 0}', g:cmdcomplete_info)
+    call assert_equal('{''cmdline_orig'': ''h echoms'', ''pum_visible'': 0, ''matches'': [], ''selected'': 0}', g:cmdcomplete_info)
     call feedkeys($":h echom{trig}\<cr>", "tx")
     call assert_equal(
           \ '{''cmdline_orig'': ''h echom'', ''pum_visible'': 1, ''matches'': ['':echom'', '':echomsg''], ''selected'': 0}',
@@ -4564,11 +4631,19 @@ func Test_search_complete()
   call feedkeys("gg/r\\n.*\\n\<tab>\<f9>", 'tx')
   call assert_equal(['r\nFoobar\nfooBAr', 'r\nfooBAr\nFooBARR'], g:compl_info.matches)
 
+  " Issue #17858
+  %d
+  set wildcharm=0 incsearch& ignorecase& smartcase& wildoptions&
+  setlocal iskeyword=!-~,192-255
+  let l:lines = ['th=~/foo', 'these', 'tho']
+  call setline(1, l:lines)
+  call feedkeys("G/th\<tab>\<f9>", 'tx')
+  call assert_equal(l:lines, g:compl_info.matches)
+
   bw!
   call test_override("char_avail", 0)
   delfunc GetComplInfo
   unlet! g:compl_info
-  set wildcharm=0 incsearch& ignorecase& smartcase& wildoptions&
 endfunc
 
 func Test_search_wildmenu_screendump()
@@ -4614,6 +4689,36 @@ func Test_search_wildmenu_screendump()
   call VerifyScreenDump(buf, 'Test_search_wildmenu_7', {})
   call term_sendkeys(buf, "\<c-n>\<c-y>")
   call VerifyScreenDump(buf, 'Test_search_wildmenu_8', {})
+
+  " 'incsearch' highlight is restored after dismissing popup (Ctrl_E)
+  call term_sendkeys(buf, "\<esc>:set wop=pum is hls&\<cr>")
+  call term_sendkeys(buf, "gg/th\<tab>\<c-e>")
+  call TermWait(buf, 50)
+  call VerifyScreenDump(buf, 'Test_search_wildmenu_9', {})
+
+  call term_sendkeys(buf, "\<esc>")
+  call StopVimInTerminal(buf)
+endfunc
+
+" Issue #17858
+func Test_search_wildmenu_iminsert()
+  CheckScreendump
+
+  let lines =<< trim [SCRIPT]
+    set wop=pum imi=1
+    setlocal iskeyword=!-~,192-255
+    call setline(1, [
+          \ "global toggle global-local global/local glyphs toggles English",
+          \ "accordingly. toggled accordingly single-byte",
+          \ ])
+    call cursor(2, 42)
+  [SCRIPT]
+  call writefile(lines, 'XTest_search_wildmenu', 'D')
+  let buf = RunVimInTerminal('-S XTest_search_wildmenu', {'rows': 12})
+
+  call term_sendkeys(buf, "/gl\<Tab>")
+  call TermWait(buf, 50)
+  call VerifyScreenDump(buf, 'Test_search_wildmenu_iminsert', {})
 
   call term_sendkeys(buf, "\<esc>")
   call StopVimInTerminal(buf)
@@ -4774,6 +4879,122 @@ func Test_cmdline_changed()
   delfunc TestComplete
   delcommand Test
   call test_override("char_avail", 0)
+endfunc
+
+func Test_wildtrigger_update_screen()
+  CheckScreendump
+
+  let lines =<< trim [SCRIPT]
+    command! -nargs=* -complete=customlist,TestFn TestCmd echo
+    func TestFn(cmdarg, b, c)
+      if a:cmdarg == 'ax'
+        return []
+      else
+        return map(range(1, 5), 'printf("abc%d", v:val)')
+      endif
+    endfunc
+    set wildmode=noselect,full
+    set wildoptions=pum
+    set wildmenu
+    cnoremap <F8> <C-R>=wildtrigger()[-1]<CR>
+  [SCRIPT]
+  call writefile(lines, 'XTest_wildtrigger', 'D')
+  let buf = RunVimInTerminal('-S XTest_wildtrigger', {'rows': 10})
+
+  call term_sendkeys(buf, ":TestCmd a\<F8>")
+  call VerifyScreenDump(buf, 'Test_wildtrigger_update_screen_1', {})
+
+  " Typing a character when pum is open does not close the pum window
+  " This is needed to prevent pum window from flickering during
+  " ':h cmdline-autocompletion'.
+  call term_sendkeys(buf, "x")
+  call VerifyScreenDump(buf, 'Test_wildtrigger_update_screen_2', {})
+
+  " pum window is closed when no completion candidates are available
+  call term_sendkeys(buf, "\<F8>")
+  call VerifyScreenDump(buf, 'Test_wildtrigger_update_screen_3', {})
+
+  call term_sendkeys(buf, "\<esc>")
+  call StopVimInTerminal(buf)
+endfunc
+
+" Issue #17969: With 'noselect', the popup menu should appear next to the
+" environment variable being expanded. Disable 'showtail' when completing
+" file paths when 'noselect' is present.
+func Test_noselect_expand_env_var()
+  CheckScreendump
+
+  let lines =<< trim [SCRIPT]
+    set wildmenu wildoptions=pum wildmode=noselect,full
+    let $TESTDIR = 'a/b'
+  [SCRIPT]
+  call writefile(lines, 'XTest_wildmenu', 'D')
+  let buf = RunVimInTerminal('-S XTest_wildmenu', {'rows': 8})
+
+  call mkdir('a/b/c', 'pR')
+  call writefile(['asdf'], 'a/b/fileXname1')
+  call writefile(['foo'], 'a/b/fileXname2')
+
+  call term_sendkeys(buf, ":e $TESTDIR/\<Tab>")
+  call VerifyScreenDump(buf, 'Test_expand_env_var_1', {})
+
+  call term_sendkeys(buf, "\<C-N>")
+  call VerifyScreenDump(buf, 'Test_expand_env_var_2', {})
+
+  call term_sendkeys(buf, "\<C-P>")
+  call VerifyScreenDump(buf, 'Test_expand_env_var_1', {})
+
+  " clean up
+  call term_sendkeys(buf, "\<Esc>")
+  call StopVimInTerminal(buf)
+endfunc
+
+" Issue #18035: long lines should not get listed twice in the menu when
+" 'wildmode' contains 'noselect'
+func Test_long_line_noselect()
+  CheckScreendump
+
+  let lines =<< trim [SCRIPT]
+    set wildmenu wildoptions=pum wildmode=noselect,full
+    command -nargs=1 -complete=custom,Entries DoubleEntry echo
+    func Entries(a, b, c)
+      return 'loooooooooooooooong quite loooooooooooong, really loooooooooooong, probably too looooooooooooooooooooooooooong entry'
+    endfunc
+  [SCRIPT]
+  call writefile(lines, 'XTest_wildmenu', 'D')
+  let buf = RunVimInTerminal('-S XTest_wildmenu', {'rows': 8, 'cols': 60})
+
+  call term_sendkeys(buf, ":DoubleEntry \<Tab>")
+  call VerifyScreenDump(buf, 'Test_long_line_noselect_1', {})
+
+  call term_sendkeys(buf, "\<Esc>:DoubleEntry \<Tab>\<C-N>")
+  call VerifyScreenDump(buf, 'Test_long_line_noselect_2', {})
+
+  call term_sendkeys(buf, "\<Esc>:DoubleEntry \<Tab>\<C-N>\<C-N>")
+  call VerifyScreenDump(buf, 'Test_long_line_noselect_3', {})
+
+  " clean up
+  call term_sendkeys(buf, "\<Esc>")
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_CmdlineLeave_vchar_keys()
+  func OnLeave()
+    let g:leave_key = v:char
+  endfunction
+
+  new
+  for event in ["CmdlineLeavePre", "CmdlineLeave"]
+    exec "autocmd" event "* :call OnLeave()"
+    for key in ["\<C-C>", "\<Esc>", "\<CR>"]
+      call feedkeys($":echo{key}", 'tx')
+      call assert_equal(key, g:leave_key)
+    endfor
+    exec "autocmd!" event
+  endfor
+  bwipe!
+  delfunc OnLeave
+  unlet g:leave_key
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

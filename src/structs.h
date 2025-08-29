@@ -1290,6 +1290,19 @@ typedef struct
 #endif
 } tasave_T;
 
+// Holds state for current OSC response.
+typedef struct
+{
+    int		    processing;	// If we are in the middle of an OSC response
+    char_u	    start_char;	// First char in the OSC response
+    garray_T	    buf;	// Buffer holding the OSC response, to be
+				// placed in the "v:termosc" vim var.
+
+    struct timeval  start;	// Set at the beginning of an OSC response.
+				// Used to timeout after a set amount of
+				// time.
+} oscstate_T;
+
 /*
  * Used for conversion of terminal I/O and script files.
  */
@@ -3316,6 +3329,8 @@ struct file_buffer
     char_u	*b_p_csl;	// 'completeslash'
 #endif
 #ifdef FEAT_COMPL_FUNC
+    callback_T	*b_p_cpt_cb;	// F{func} in 'complete' callback
+    int		b_p_cpt_count;	// Count of values in 'complete'
     char_u	*b_p_cfu;	// 'completefunc'
     callback_T	b_cfu_cb;	// 'completefunc' callback
     char_u	*b_p_ofu;	// 'omnifunc'
@@ -3604,7 +3619,7 @@ struct file_buffer
 }; // file_buffer
 
 
-#ifdef FEAT_DIFF
+#if defined(FEAT_DIFF) || defined(PROTO)
 /*
  * Stuff for diff mode.
  */
@@ -3669,6 +3684,9 @@ struct diffline_S
     int bufidx;
     int lineoff;
 };
+#else  // FEAT_DIFF
+typedef void diffline_T;
+typedef void diffline_change_T;
 #endif
 
 #define SNAP_HELP_IDX	0

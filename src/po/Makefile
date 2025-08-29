@@ -41,7 +41,8 @@ converted: $(MOCONVERTED)
 
 .po.ck:
 	$(VIMPROG) -u NONE --noplugins -e -s -X --cmd "set enc=utf-8" \
-		-S check.vim -c "if error == 0 | q | else | num 2 | cq | endif" $< >/dev/null
+		-S check.vim -c "if error == 0 | q | else | num 2 | cq | endif" \
+		$< >/dev/null
 	touch $@
 
 check: $(CHECKFILES)
@@ -89,11 +90,6 @@ tryoutinstall: $(MOFILES) $(MOCONVERTED)
 	    chmod 644 $$dir/$(PACKAGE).mo; \
 	  fi; \
 	done
-
-# nl.po was added later, if it does not exist use a file with just a # in it
-# (an empty file doesn't work with old msgfmt).
-nl.po:
-	@( echo \# >> nl.po )
 
 # Norwegian/Bokmal: "nb" is an alias for "no".
 # Copying the file is not efficient, but I don't know of another way to make
@@ -269,7 +265,8 @@ $(PACKAGE).pot: $(PO_INPUTLIST) $(PO_VIM_INPUTLIST)
 	# Create vim.pot.
 	$(XGETTEXT) --default-domain=$(PACKAGE) --output=$(PACKAGE).pot \
 		--add-comments $(XGETTEXT_KEYWORDS) --files-from=./allfiles \
-		--no-location
+		--no-location --copyright-holder="$$(date +%Y), The Vim Project" \
+		--package-name=Vim --msgid-bugs-address="vim-dev@vim.org"
 	# Fix Vim scripts names, so that "gf" works.
 	$(VIMPROG) -u NONE --not-a-term -S fixfilenames.vim $(PACKAGE).pot \
 		$(PO_VIM_INPUTLIST)

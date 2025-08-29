@@ -45,7 +45,7 @@ static char *(p_ff_values[]) = {FF_UNIX, FF_DOS, FF_MAC, NULL};
 // Note: Keep this in sync with did_set_clipboard()
 static char *(p_cb_values[]) = {"unnamed", "unnamedplus", "autoselect", "autoselectplus", "autoselectml", "html", "exclude:", NULL};
 // Note: Keep this in sync with get_clipmethod()
-static char *(p_cpm_values[]) = {"wayland", "x11", NULL};
+static char *(p_cpm_values[]) = {"wayland", "x11", "gui", "other", NULL};
 #endif
 #ifdef FEAT_CRYPT
 static char *(p_cm_values[]) = {"zip", "blowfish", "blowfish2",
@@ -249,6 +249,15 @@ illegal_char(char *errbuf, size_t errbuflen, int c)
 	return "";
     vim_snprintf(errbuf, errbuflen, _(e_illegal_character_str),
 		    (char *)transchar(c));
+    return errbuf;
+}
+
+    static char *
+illegal_char_after_chr(char *errbuf, size_t errbuflen, int c)
+{
+    if (errbuf == NULL)
+	return "";
+    vim_snprintf(errbuf, errbuflen, _(e_illegal_character_after_chr), c);
     return errbuf;
 }
 
@@ -1270,7 +1279,10 @@ did_set_breakindentopt(optset_T *args)
 }
 
     int
-expand_set_breakindentopt(optexpand_T *args, int *numMatches, char_u ***matches)
+expand_set_breakindentopt(
+    optexpand_T		*args,
+    int			*numMatches,
+    char_u		***matches)
 {
     return expand_set_opt_string(
 	    args,
@@ -1644,19 +1656,18 @@ did_set_complete(optset_T *args)
 	    }
 	}
 	if (char_before != NUL)
-	{
-	    if (args->os_errbuf)
-	    {
-		vim_snprintf((char *)args->os_errbuf, args->os_errbuflen,
-			_(e_illegal_character_after_chr), char_before);
-		return args->os_errbuf;
-	    }
-	    return NULL;
-	}
+	    return illegal_char_after_chr(args->os_errbuf, args->os_errbuflen,
+		    char_before);
 	// Skip comma and spaces
 	while (*p == ',' || *p == ' ')
 	    p++;
     }
+
+#ifdef FEAT_COMPL_FUNC
+    if (set_cpt_callbacks(args) != OK)
+	return illegal_char_after_chr(args->os_errbuf, args->os_errbuflen,
+		'F');
+#endif
     return NULL;
 }
 
@@ -3605,7 +3616,7 @@ did_set_rulerformat(optset_T *args)
 }
 #endif
 
-#if defined(FEAT_TABPANEL)
+#if defined(FEAT_TABPANEL) || defined(PROTO)
 /*
  * Process the new 'tabpanelopt' option value.
  */
@@ -3748,7 +3759,10 @@ did_set_sessionoptions(optset_T *args)
 }
 
     int
-expand_set_sessionoptions(optexpand_T *args, int *numMatches, char_u ***matches)
+expand_set_sessionoptions(
+    optexpand_T		*args,
+    int			*numMatches,
+    char_u		***matches)
 {
     return expand_set_opt_string(
 	    args,
@@ -4300,7 +4314,10 @@ did_set_toolbariconsize(optset_T *args UNUSED)
 }
 
     int
-expand_set_toolbariconsize(optexpand_T *args, int *numMatches, char_u ***matches)
+expand_set_toolbariconsize(
+    optexpand_T	*args,
+    int		*numMatches,
+    char_u	***matches)
 {
     return expand_set_opt_string(
 	    args,
@@ -5051,7 +5068,7 @@ restore_shm_value(void)
  * Export the environment variable $MYVIMDIR to the first item in runtimepath
  */
     void
-export_myvimdir()
+export_myvimdir(void)
 {
     int		dofree = FALSE;
     char_u	*p;
