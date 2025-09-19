@@ -55,10 +55,9 @@ func s:CheckXConnection()
   CheckFeature x11
   try
     call remote_send('xxx', '')
+  catch /^Vim\%((\a\+)\)\=:E240:/ " not possible to start a remote server
+      throw 'Skipped: No connection to the X server possible'
   catch
-    if v:exception =~ 'E240:'
-      thrclientserverow 'Skipped: no connection to the X server'
-    endif
     " ignore other errors
   endtry
 endfunc
@@ -138,7 +137,7 @@ func Test_wayland_wlrestore()
 
   call assert_equal('2', getreg('+'))
 
-  " Check if wlrestore doesn't disconnect the display if not nessecary by seeing
+  " Check if wlrestore doesn't disconnect the display if not necessary by seeing
   " if Vim doesn't lose the selection
   call setreg('+', 'testing', 'c')
 
@@ -210,7 +209,7 @@ func Test_wayland_paste()
 
   bw!
 
-  " Check behaviour when selecton is cleared (empty)
+  " Check behaviour when selection is cleared (empty)
   call system('wl-copy --clear')
   call assert_fails('put +', 'E353:')
 endfunc
