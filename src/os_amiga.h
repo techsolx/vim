@@ -20,10 +20,10 @@
 # if defined(AZTEC_C) || defined(__amigaos4__)
 #  define HAVE_STAT_H
 # endif
+# define HAVE_LOCALE_H
 # define HAVE_STDLIB_H
 # define HAVE_STRING_H
 # define HAVE_FCNTL_H
-# define HAVE_STRCSPN
 # define HAVE_STRICMP
 # define HAVE_STRNICMP
 # define HAVE_STRFTIME	    // guessed
@@ -88,6 +88,16 @@ typedef long off_t;
 # include <pwd.h>
 # include <grp.h>
 # include <dirent.h>
+#endif
+
+// Classic AmigaOS 3.x with GCC/libnix does not provide fchown, fchmod, or
+// ftruncate.  Stub them as no-ops.  (OS4 has these via clib2; MorphOS and
+// AROS provide them in their respective C libraries.)
+#if defined(__GNUC__) && defined(AMIGA) && !defined(__amigaos4__) \
+	&& !defined(__AROS__) && !defined(__MORPHOS__)
+# define fchown(fd, uid, gid) (0)
+# define fchmod(fd, mode) (0)
+# define ftruncate(fd, len) (0)
 #endif
 
 #include <time.h>	// for strftime() and others
@@ -166,7 +176,7 @@ typedef long off_t;
 
 #ifdef FEAT_VIMINFO
 # ifndef VIMINFO_FILE
-# define VIMINFO_FILE	"VIM:.viminfo"
+#  define VIMINFO_FILE	"VIM:.viminfo"
 # endif
 #endif
 

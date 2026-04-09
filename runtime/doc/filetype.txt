@@ -1,7 +1,7 @@
-*filetype.txt*	For Vim version 9.1.  Last change: 2025 Oct 12
+*filetype.txt*	For Vim version 9.2.  Last change: 2026 Apr 07
 
 
-		  VIM REFERENCE MANUAL    by Bram Moolenaar
+		  VIM REFERENCE MANUAL	  by Bram Moolenaar
 
 
 Filetypes						*filetype* *file-type*
@@ -138,6 +138,7 @@ what kind of file it is.  This doesn't always work.  A number of global
 variables can be used to overrule the filetype used for certain extensions:
 
 	file name	variable ~
+	*.app		g:filetype_app
 	*.asa		g:filetype_asa		|ft-aspperl-syntax|
 						|ft-aspvbs-syntax|
 	*.asm		g:asmsyntax		|ft-asm-syntax|
@@ -160,8 +161,10 @@ variables can be used to overrule the filetype used for certain extensions:
 						|ft-cpp-syntax|
 	*.i		g:filetype_i		|ft-progress-syntax|
 	*.inc		g:filetype_inc
+	*.int		g:filetype_int
 	*.lsl		g:filetype_lsl
 	*.m		g:filetype_m		|ft-mathematica-syntax|
+	*.mac		g:filetype_mac
 	*[mM]makefile,*.mk,*.mak,[mM]akefile*
 			g:make_flavor		|ft-make-syntax|
 	*.markdown,*.mdown,*.mkd,*.mkdn,*.mdwn,*.md
@@ -648,6 +651,13 @@ GIT COMMIT						*ft-gitcommit-plugin*
 One command, :DiffGitCached, is provided to show a diff of the current commit
 in the preview window.  It is equivalent to calling "git diff --cached" plus
 any arguments given to the command.
+
+
+The length of the first line of the commit message used for
+syntax highlighting can be configured via `g:gitcommit_summary_length`.
+The default is 50.  Example: >
+
+        let g:gitcommit_summary_length = 70
 
 GIT REBASE						*ft-gitrebase-plugin*
 

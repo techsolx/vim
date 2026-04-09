@@ -18,6 +18,9 @@
 "   2025 May 19 by Vim Project: restore working directory after read/write
 "   2025 Jul 13 by Vim Project: warn with path traversal attacks
 "   2025 Jul 16 by Vim Project: update minimum vim version
+"   2026 Feb 06 by Vim Project: consider 'nowrapscan' (#19333)
+"   2026 Feb 07 by Vim Project: make the path traversal detection more robust (#19341)
+"   2026 Apr 06 by Vim Project: fix bugs with lz4 support (#19925)
 "
 "	Contains many ideas from Michael Toren's <tar.vim>
 "
@@ -110,7 +113,7 @@ if !exists("g:tar_shq")
 endif
 
 let g:tar_secure=' -- '
-let g:tar_leading_pat='^\%([.]\{,2\}/\)\+'
+let g:tar_leading_pat='\m^\%([.]\{,2\}/\)\+'
 
 " ----------------
 "  Functions: {{{1
@@ -226,7 +229,7 @@ fun! tar#Browse(tarfile)
 
   " remove tar: Removing leading '/' from member names
   " Note: the message could be localized
-  if search('^tar: ') > 0 || search(g:tar_leading_pat) > 0
+  if search('\m^g\?tar: ', 'w') > 0 || search(g:tar_leading_pat, 'w') > 0
     call append(3,'" Note: Path Traversal Attack detected!')
     let b:leading_slash = 1
     " remove the message output
@@ -702,7 +705,9 @@ fun! tar#Extract()
    endif
 
   elseif filereadable(tarbase.".tlz4")
-   let extractcmd= substitute(extractcmd,"-","-I lz4","")
+   if has("linux")
+    let extractcmd= substitute(extractcmd,"-","-I lz4 -","")
+   endif
    call system(extractcmd." ".shellescape(tarbase).".tlz4 ".shellescape(fname))
    if v:shell_error != 0
     call s:Msg('tar#Extract', 'error', $"{extractcmd} {tarbase}.tlz4 {fname}: failed!")
@@ -711,8 +716,10 @@ fun! tar#Extract()
    endif
 
   elseif filereadable(tarbase.".tar.lz4")
-   let extractcmd= substitute(extractcmd,"-","-I lz4","")
-   call system(extractcmd." ".shellescape(tarbase).".tar.lz4".shellescape(fname))
+   if has("linux")
+    let extractcmd= substitute(extractcmd,"-","-I lz4 -","")
+   endif
+   call system(extractcmd." ".shellescape(tarbase).".tar.lz4 ".shellescape(fname))
    if v:shell_error != 0
     call s:Msg('tar#Extract', 'error', $"{extractcmd} {tarbase}.tar.lz4 {fname}: failed!")
    else

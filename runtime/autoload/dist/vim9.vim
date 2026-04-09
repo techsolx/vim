@@ -3,7 +3,7 @@ vim9script
 # Vim runtime support library
 #
 # Maintainer:   The Vim Project <https://github.com/vim/vim>
-# Last Change:  2025 Aug 15
+# Last Change:  2026 Apr 06
 
 export def IsSafeExecutable(filetype: string, executable: string): bool
   if empty(exepath(executable))
@@ -60,15 +60,20 @@ if has('unix')
     enddef
   else
     export def Launch(args: string)
-      const fork = has('gui_running') ? '' : '&'
-      execute $':silent ! nohup {args} {Redir()} {fork}' | redraw!
+      # Use job_start, because using !xdg-open is known not to work with zsh
+      # ignore signals on exit
+      job_start(['sh', '-c', args], {'stoponexit': '', 'in_io': 'null', 'out_io': 'null', 'err_io': 'null'})
     enddef
   endif
 elseif has('win32')
   export def Launch(args: string)
-    const shell = (&shell =~? '\<cmd\.exe\>') ? '' : 'cmd.exe /c'
-    const quotes = empty(shell) ? '' : '""'
-    execute $'silent ! {shell} start {quotes} /b {args} {Redir()}' | redraw!
+    try
+      execute ':silent !start' args | redraw!
+    catch /^Vim(!):E371:/
+      echohl ErrorMsg
+      echom "dist#vim9#Launch(): can not start" args
+      echohl None
+    endtry
   enddef
 else
   export def Launch(dummy: string)
@@ -81,7 +86,10 @@ var os_viewer = null_string
 if has('win32unix')
   # (cyg)start suffices
   os_viewer = ''
-# Windows / WSL
+# Windows
+elseif has('win32')
+  os_viewer = '' # Use :!start
+# WSL
 elseif executable('explorer.exe')
   os_viewer = 'explorer.exe'
 # Linux / BSD
@@ -125,6 +133,11 @@ export def Open(file: string)
   if exists('+shellslash') && &shellslash
     &shellslash = false
     defer setbufvar('%', '&shellslash', true)
+  endif
+  if &shell == 'pwsh' || &shell == 'powershell'
+    const shell = &shell
+    setlocal shell&
+    defer setbufvar('%', '&shell', shell)
   endif
   Launch($"{Viewer()} {shellescape(file, 1)}")
 enddef

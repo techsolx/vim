@@ -563,7 +563,7 @@ parse_argument_types(
 			{
 			    if (obj_members != NULL
 				    && STRCMP(aname,
-					obj_members[om].ocm_name) == 0)
+					obj_members[om].ocm_name.string) == 0)
 			    {
 				type = obj_members[om].ocm_type;
 				break;
@@ -1405,7 +1405,7 @@ get_function_body(
 	    // For a :def function "python << EOF" concatenates all the lines,
 	    // to be used for the instruction later.
 	    ga_concat(&heredoc_ga, theline);
-	    ga_concat(&heredoc_ga, (char_u *)"\n");
+	    GA_CONCAT_LITERAL(&heredoc_ga, "\n");
 	    p = vim_strnsave((char_u *)"", 0);
 	}
 	else
@@ -2910,7 +2910,7 @@ funcdepth_increment(void)
 {
     if (funcdepth >= p_mfd)
     {
-	emsg(_(e_function_call_depth_is_higher_than_macfuncdepth));
+	emsg(_(e_function_call_depth_is_higher_than_maxfuncdepth));
 	return FAIL;
     }
     ++funcdepth;
@@ -4524,7 +4524,8 @@ trans_function_name_ext(
 	else if (lv.ll_tv->v_type == VAR_CLASS
 					     && lv.ll_tv->vval.v_class != NULL)
 	{
-	    name = vim_strsave(lv.ll_tv->vval.v_class->class_name);
+	    name = vim_strnsave(lv.ll_tv->vval.v_class->class_name.string,
+		lv.ll_tv->vval.v_class->class_name.length);
 	    *pp = end;
 	}
 	else if (lv.ll_tv->v_type == VAR_PARTIAL
@@ -5252,33 +5253,40 @@ define_function(
 	    char_u  *name_base = arg;
 	    int	    i;
 
-	    if (*arg == K_SPECIAL)
+	    // When defining a dictionary function with bracket notation
+	    // (e.g. obj['foo-bar']()), the key is a dictionary key and is not
+	    // required to follow function naming rules.  Skip the identifier
+	    // check in that case.
+	    if (arg != fudi.fd_newkey)
 	    {
-		name_base = vim_strchr(arg, '_');
-		if (name_base == NULL)
-		    name_base = arg + 3;
-		else
-		    ++name_base;
-	    }
-	    for (i = 0; name_base[i] != NUL && (i == 0
-					? eval_isnamec1(name_base[i])
-					: eval_isnamec(name_base[i])); ++i)
-		;
-	    if (name_base[i] != NUL)
-	    {
-		emsg_funcname(e_invalid_argument_str, arg);
-		goto ret_free;
-	    }
+		if (*arg == K_SPECIAL)
+		{
+		    name_base = vim_strchr(arg, '_');
+		    if (name_base == NULL)
+			name_base = arg + 3;
+		    else
+			++name_base;
+		}
+		for (i = 0; name_base[i] != NUL && (i == 0
+					    ? eval_isnamec1(name_base[i])
+					    : eval_isnamec(name_base[i])); ++i)
+		    ;
+		if (name_base[i] != NUL)
+		{
+		    emsg_funcname(e_invalid_argument_str, arg);
+		    goto ret_free;
+		}
 
-	    // In Vim9 script a function cannot have the same name as a
-	    // variable.
-	    if (vim9script && *arg == K_SPECIAL
-		&& eval_variable(name_base, i, 0, NULL,
-		    NULL, EVAL_VAR_NOAUTOLOAD + EVAL_VAR_IMPORT
+		// In Vim9 script a function cannot have the same name as a
+		// variable.
+		if (vim9script && *arg == K_SPECIAL
+		    && eval_variable(name_base, i, 0, NULL,
+			NULL, EVAL_VAR_NOAUTOLOAD + EVAL_VAR_IMPORT
 						     + EVAL_VAR_NO_FUNC) == OK)
-	    {
-		semsg(_(e_redefining_script_item_str), name_base);
-		goto ret_free;
+		{
+		    semsg(_(e_redefining_script_item_str), name_base);
+		    goto ret_free;
+		}
 	    }
 	}
 	// Disallow using the g: dict.
@@ -5955,7 +5963,7 @@ defcompile_function(ufunc_T *ufunc, class_T *cl)
 	(void)compile_def_function(ufunc, FALSE, compile_type, NULL);
     else
 	smsg(_("Function %s%s%s does not need compiling"),
-				cl != NULL ? cl->class_name : (char_u *)"",
+				cl != NULL ? cl->class_name.string : (char_u *)"",
 				cl != NULL ? (char_u *)"." : (char_u *)"",
 				ufunc->uf_name);
 }

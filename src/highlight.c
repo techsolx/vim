@@ -159,9 +159,9 @@ typedef struct
 #endif
 #ifdef FEAT_GUI
     GuiFont	sg_font;	// GUI font handle
-#ifdef FEAT_XFONTSET
+# ifdef FEAT_XFONTSET
     GuiFontset	sg_fontset;	// GUI fontset handle
-#endif
+# endif
     char_u	*sg_font_name;  // GUI font or fontset name
     int		sg_gui_attr;    // Screen attr for GUI mode
 #endif
@@ -181,9 +181,46 @@ typedef struct
 #endif
 } hl_group_T;
 
+typedef struct hl_overrides_S hl_overrides_T;
+struct hl_overrides_S
+{
+    hl_override_T   *arr;   // May be NULL if "arr" was freed
+    int		    len;
+    hl_overrides_T  *next;  // Used to handle recursive calls
+
+    int attr[HLF_COUNT];    // highlight_attr[] before being updated.
+};
+
+static hl_overrides_T *overrides = NULL;
+
+// Synced with highlight_attr, each is the highlight group id for each attr. If
+// an element is 0, then there is no attr for it. If an element is -1, then it
+// means it was set to itself.
+static int highlight_ids[HLF_COUNT];
+
+// Same as highlight_attr[] but is not modified by highlight group overrides
+static int highlight_attr_raw[HLF_COUNT];
+
+static int hl_flags[HLF_COUNT] = HL_FLAGS;
+
 // highlight groups for 'highlight' option
 static garray_T highlight_ga;
 #define HL_TABLE()	((hl_group_T *)((highlight_ga.ga_data)))
+
+// Wrapper struct for hashtable entries: stores the highlight group ID alongside
+// the uppercase name used as a hash key.  Uses the same offsetof pattern as
+// signgroup_T / HI2SG.
+typedef struct {
+    int		hn_id;		// highlight group ID (1-based)
+    char_u	hn_key[1];	// uppercase name (stretchable array)
+} hlname_T;
+
+#define HLNAME_KEY_OFF	offsetof(hlname_T, hn_key)
+#define HI2HLNAME(hi)	((hlname_T *)((hi)->hi_key - HLNAME_KEY_OFF))
+
+// hashtable for quick highlight group name lookup
+static hashtab_T highlight_ht;
+static bool	 highlight_ht_inited = false;
 
 /*
  * An attribute number is the index in attr_table plus ATTR_OFF.
@@ -195,6 +232,7 @@ static void set_hl_attr(int idx);
 static void highlight_list_one(int id);
 static int highlight_list_arg(int id, int didh, int type, int iarg, char_u *sarg, char *name);
 static int syn_add_group(char_u *name);
+static int syn_name2id_len(char_u *name, int len);
 static int hl_has_settings(int idx, int check_link);
 static void highlight_clear(int idx);
 
@@ -995,8 +1033,6 @@ highlight_set_font(
 	    // New fontset was accepted. Free the old one, if there
 	    // was one.
 	    gui_mch_free_fontset(temp_sg_fontset);
-	    vim_free(HL_TABLE()[idx].sg_font_name);
-	    HL_TABLE()[idx].sg_font_name = vim_strsave(arg);
 	    did_change = TRUE;
 	}
 	else
@@ -1007,12 +1043,17 @@ highlight_set_font(
 	    // New font was accepted. Free the old one, if there was
 	    // one.
 	    gui_mch_free_font(temp_sg_font);
-	    vim_free(HL_TABLE()[idx].sg_font_name);
-	    HL_TABLE()[idx].sg_font_name = vim_strsave(arg);
 	    did_change = TRUE;
 	}
 	else
 	    HL_TABLE()[idx].sg_font = temp_sg_font;
+	// Update sg_font_name once here, after both font and fontset results
+	// are known.
+	if (did_change)
+	{
+	    vim_free(HL_TABLE()[idx].sg_font_name);
+	    HL_TABLE()[idx].sg_font_name = vim_strsave(arg);
+	}
     }
 
     return did_change;
@@ -2009,9 +2050,11 @@ free_highlight(void)
     {
 	highlight_clear(i);
 	vim_free(HL_TABLE()[i].sg_name);
-	vim_free(HL_TABLE()[i].sg_name_u);
+	vim_free(HL_TABLE()[i].sg_name_u - HLNAME_KEY_OFF);
     }
     ga_clear(&highlight_ga);
+    hash_clear(&highlight_ht);
+    highlight_ht_inited = false;
 }
 #endif
 
@@ -2396,18 +2439,18 @@ hl_do_font(
 	// fontset.  Same for the Menu group.
 	if (do_normal)
 	    gui_init_font(arg, TRUE);
-#   if defined(FEAT_GUI_MOTIF) && defined(FEAT_MENU)
+#  if defined(FEAT_GUI_MOTIF) && defined(FEAT_MENU)
 	if (do_menu)
 	{
-#    ifdef FONTSET_ALWAYS
+#   ifdef FONTSET_ALWAYS
 	    gui.menu_fontset = HL_TABLE()[idx].sg_fontset;
-#    else
+#   else
 	    // YIKES!  This is a bug waiting to crash the program
 	    gui.menu_font = HL_TABLE()[idx].sg_fontset;
-#    endif
+#   endif
 	    gui_mch_new_menu_font();
 	}
-#    ifdef FEAT_BEVAL_GUI
+#   ifdef FEAT_BEVAL_GUI
 	if (do_tooltip)
 	{
 	    // The Athena widget set could not handle switching between
@@ -2418,8 +2461,8 @@ hl_do_font(
 	    gui.tooltip_fontset = (XFontSet)HL_TABLE()[idx].sg_fontset;
 	    gui_mch_new_tooltip_font();
 	}
-#    endif
 #   endif
+#  endif
     }
     else
 # endif
@@ -2433,15 +2476,15 @@ hl_do_font(
 	{
 	    if (do_normal)
 		gui_init_font(arg, FALSE);
-#ifndef FONTSET_ALWAYS
-# if defined(FEAT_GUI_MOTIF) && defined(FEAT_MENU)
+# ifndef FONTSET_ALWAYS
+#  if defined(FEAT_GUI_MOTIF) && defined(FEAT_MENU)
 	    if (do_menu)
 	    {
 		gui.menu_font = HL_TABLE()[idx].sg_font;
 		gui_mch_new_menu_font();
 	    }
+#  endif
 # endif
-#endif
 	}
     }
 }
@@ -2461,33 +2504,33 @@ color_name2handle(char_u *name)
 
     if (STRICMP(name, "fg") == 0 || STRICMP(name, "foreground") == 0)
     {
-#if defined(FEAT_TERMGUICOLORS) && defined(FEAT_GUI)
+# if defined(FEAT_TERMGUICOLORS) && defined(FEAT_GUI)
 	if (gui.in_use)
-#endif
-#ifdef FEAT_GUI
+# endif
+# ifdef FEAT_GUI
 	    return gui.norm_pixel;
-#endif
-#ifdef FEAT_TERMGUICOLORS
+# endif
+# ifdef FEAT_TERMGUICOLORS
 	if (cterm_normal_fg_gui_color != INVALCOLOR)
 	    return cterm_normal_fg_gui_color;
 	// Guess that the foreground is black or white.
 	return GUI_GET_COLOR((char_u *)(*p_bg == 'l' ? "black" : "white"));
-#endif
+# endif
     }
     if (STRICMP(name, "bg") == 0 || STRICMP(name, "background") == 0)
     {
-#if defined(FEAT_TERMGUICOLORS) && defined(FEAT_GUI)
+# if defined(FEAT_TERMGUICOLORS) && defined(FEAT_GUI)
 	if (gui.in_use)
-#endif
-#ifdef FEAT_GUI
+# endif
+# ifdef FEAT_GUI
 	    return gui.back_pixel;
-#endif
-#ifdef FEAT_TERMGUICOLORS
+# endif
+# ifdef FEAT_TERMGUICOLORS
 	if (cterm_normal_bg_gui_color != INVALCOLOR)
 	    return cterm_normal_bg_gui_color;
 	// Guess that the background is white or black.
 	return GUI_GET_COLOR((char_u *)(*p_bg == 'l' ? "white" : "black"));
-#endif
+# endif
     }
 
     return GUI_GET_COLOR(name);
@@ -2544,7 +2587,7 @@ decode_hex_color(char_u *hex)
     return gui_adjust_rgb(color);
 }
 
-#ifdef FEAT_EVAL
+# ifdef FEAT_EVAL
 // Returns the color currently mapped to the given name or INVALCOLOR if no
 // such name exists in the color table. The convention is to use lowercase for
 // all keys in the v:colornames dictionary. The value can be either a string in
@@ -2590,7 +2633,7 @@ colorname2rgb(char_u *name)
     return INVALCOLOR;
 }
 
-#endif
+# endif
 
     guicolor_T
 gui_get_color_cmn(char_u *name)
@@ -2647,7 +2690,7 @@ gui_get_color_cmn(char_u *name)
     if (entry != NULL)
 	return gui_adjust_rgb((guicolor_T)entry->key);
 
-#if defined(FEAT_EVAL)
+# if defined(FEAT_EVAL)
     /*
      * Not a traditional color. Load additional color aliases and then consult the alias table.
      */
@@ -2660,9 +2703,9 @@ gui_get_color_cmn(char_u *name)
     }
 
     return color;
-#else
+# else
     return INVALCOLOR;
-#endif
+# endif
 }
 
     guicolor_T
@@ -2692,7 +2735,7 @@ static garray_T	cterm_attr_table = {0, 0, 0, 0, NULL};
 #ifdef FEAT_GUI
 static garray_T	gui_attr_table = {0, 0, 0, 0, NULL};
 
-#define GUI_ATTR_ENTRY(idx) ((attrentry_T *)gui_attr_table.ga_data)[idx]
+# define GUI_ATTR_ENTRY(idx) ((attrentry_T *)gui_attr_table.ga_data)[idx]
 #endif
 
 /*
@@ -2726,9 +2769,9 @@ get_attr_entry(garray_T *table, attrentry_T *aep)
 			    && aep->ae_u.gui.sp_color
 						    == taep->ae_u.gui.sp_color
 			    && aep->ae_u.gui.font == taep->ae_u.gui.font
-#  ifdef FEAT_XFONTSET
+# ifdef FEAT_XFONTSET
 			    && aep->ae_u.gui.fontset == taep->ae_u.gui.fontset
-#  endif
+# endif
 			    ))
 		    ||
 #endif
@@ -2844,11 +2887,11 @@ get_cterm_attr_idx(int attr, int fg, int bg)
     attrentry_T		at_en;
 
     CLEAR_FIELD(at_en);
-#ifdef FEAT_TERMGUICOLORS
+# ifdef FEAT_TERMGUICOLORS
     at_en.ae_u.cterm.fg_rgb = INVALCOLOR;
     at_en.ae_u.cterm.bg_rgb = INVALCOLOR;
     at_en.ae_u.cterm.ul_rgb = INVALCOLOR;
-#endif
+# endif
     at_en.ae_attr = attr;
     at_en.ae_u.cterm.fg_color = fg;
     at_en.ae_u.cterm.bg_color = bg;
@@ -3081,6 +3124,335 @@ hl_combine_attr(int char_attr, int prim_attr)
     return get_attr_entry(&term_attr_table, &new_en);
 }
 
+#if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
+/*
+ * Blend two RGB colors based on blend value (0-100).
+ * blend: 0=use popup color, 100=use background color
+ * If bg_color is INVALCOLOR, high blend means more visible (return INVALCOLOR).
+ */
+    static guicolor_T
+blend_colors(guicolor_T popup_color, guicolor_T bg_color, int blend_val)
+{
+    int r1, g1, b1, r2, g2, b2, r, g, b;
+
+    if (popup_color == INVALCOLOR)
+	return INVALCOLOR;
+
+    // Fully transparent: use underlying color as-is.
+    if (blend_val >= 100)
+	return bg_color;
+
+    r1 = (popup_color >> 16) & 0xFF;
+    g1 = (popup_color >> 8) & 0xFF;
+    b1 = popup_color & 0xFF;
+
+    if (bg_color == INVALCOLOR)
+    {
+	// Background color unknown: fade popup color to black as blend increases
+	// This makes background text more visible at high blend values
+	r = r1 * (100 - blend_val) / 100;
+	g = g1 * (100 - blend_val) / 100;
+	b = b1 * (100 - blend_val) / 100;
+	return (r << 16) | (g << 8) | b;
+    }
+
+    r2 = (bg_color >> 16) & 0xFF;
+    g2 = (bg_color >> 8) & 0xFF;
+    b2 = bg_color & 0xFF;
+
+    r = r1 + (r2 - r1) * blend_val / 100;
+    g = g1 + (g2 - g1) * blend_val / 100;
+    b = b1 + (b2 - b1) * blend_val / 100;
+
+    return (r << 16) | (g << 8) | b;
+}
+#endif
+
+/*
+ * Blend attributes for popup windows with opacity.
+ * Blends foreground and/or background colors based on blend value (0-100).
+ * blend: 0 = opaque (use popup colors), 100 = transparent (use background colors)
+ * blend_fg: TRUE to blend foreground color, FALSE to keep popup foreground
+ */
+    int
+hl_blend_attr(int char_attr, int popup_attr, int blend, int blend_fg UNUSED)
+{
+    attrentry_T *char_aep = NULL;
+    attrentry_T *popup_aep;
+    attrentry_T new_en;
+
+    // If both attrs are 0, return 0
+    if (char_attr == 0 && popup_attr == 0)
+	return 0;
+    if (blend >= 100 && blend_fg)
+	return char_attr;  // Fully transparent for both fg and bg
+
+#ifdef FEAT_GUI
+    if (gui.in_use)
+    {
+	if (char_attr > HL_ALL)
+	    char_aep = syn_gui_attr2entry(char_attr);
+	if (char_aep != NULL)
+	    new_en = *char_aep;
+	else
+	{
+	    CLEAR_FIELD(new_en);
+	    new_en.ae_u.gui.fg_color = INVALCOLOR;
+	    new_en.ae_u.gui.bg_color = INVALCOLOR;
+	    new_en.ae_u.gui.sp_color = INVALCOLOR;
+	    if (char_attr <= HL_ALL)
+		new_en.ae_attr = char_attr;
+	}
+
+	if (popup_attr > HL_ALL)
+	{
+	    popup_aep = syn_gui_attr2entry(popup_attr);
+	    if (popup_aep != NULL)
+	    {
+		if (blend_fg)
+		{
+		    // blend_fg=TRUE: fade underlying text toward popup bg.
+		    if (popup_aep->ae_u.gui.bg_color != INVALCOLOR)
+		    {
+			int base_fg = 0xFFFFFF;
+			if (char_aep != NULL
+				&& char_aep->ae_u.gui.fg_color != INVALCOLOR)
+			    base_fg = char_aep->ae_u.gui.fg_color;
+			new_en.ae_u.gui.fg_color = blend_colors(
+				base_fg, popup_aep->ae_u.gui.bg_color, blend);
+		    }
+		}
+		else if (popup_aep->ae_u.gui.fg_color != INVALCOLOR)
+		{
+		    // blend_fg=FALSE: use popup foreground
+		    new_en.ae_u.gui.fg_color = popup_aep->ae_u.gui.fg_color;
+		}
+		// Blend background color: blend popup bg toward underlying bg
+		if (popup_aep->ae_u.gui.bg_color != INVALCOLOR)
+		{
+		    guicolor_T underlying_bg = INVALCOLOR;
+		    if (char_aep != NULL)
+			underlying_bg = char_aep->ae_u.gui.bg_color;
+		    new_en.ae_u.gui.bg_color = blend_colors(
+			    popup_aep->ae_u.gui.bg_color,
+			    underlying_bg, blend);
+		}
+	    }
+	}
+	return get_attr_entry(&gui_attr_table, &new_en);
+    }
+#endif
+
+    if (IS_CTERM)
+    {
+	if (char_attr > HL_ALL)
+	    char_aep = syn_cterm_attr2entry(char_attr);
+	if (char_aep != NULL)
+	    new_en = *char_aep;
+	else
+	{
+	    CLEAR_FIELD(new_en);
+#ifdef FEAT_TERMGUICOLORS
+	    new_en.ae_u.cterm.bg_rgb = INVALCOLOR;
+	    new_en.ae_u.cterm.fg_rgb = INVALCOLOR;
+	    new_en.ae_u.cterm.ul_rgb = INVALCOLOR;
+#endif
+	    if (char_attr <= HL_ALL)
+		new_en.ae_attr = char_attr;
+	}
+
+	if (popup_attr > HL_ALL)
+	{
+	    popup_aep = syn_cterm_attr2entry(popup_attr);
+	    if (popup_aep != NULL)
+	    {
+		// Blend foreground color
+		if (popup_aep->ae_u.cterm.fg_color > 0)
+		    new_en.ae_u.cterm.fg_color = popup_aep->ae_u.cterm.fg_color;
+		// Use popup background color (cterm colors don't support blending)
+		if (popup_aep->ae_u.cterm.bg_color > 0)
+		    new_en.ae_u.cterm.bg_color = popup_aep->ae_u.cterm.bg_color;
+#ifdef FEAT_TERMGUICOLORS
+		// Blend RGB colors for termguicolors mode
+		if (blend_fg)
+		{
+		    // blend_fg=TRUE: fade underlying text toward popup bg.
+		    if (popup_aep->ae_u.cterm.bg_rgb != INVALCOLOR)
+		    {
+			int base_fg = 0xFFFFFF;
+			if (char_aep != NULL
+				&& char_aep->ae_u.cterm.fg_rgb != INVALCOLOR)
+			    base_fg = char_aep->ae_u.cterm.fg_rgb;
+			new_en.ae_u.cterm.fg_rgb = blend_colors(
+				base_fg, popup_aep->ae_u.cterm.bg_rgb, blend);
+		    }
+		}
+		else if (popup_aep->ae_u.cterm.fg_rgb != INVALCOLOR)
+		    // blend_fg=FALSE: use popup foreground
+		    new_en.ae_u.cterm.fg_rgb = popup_aep->ae_u.cterm.fg_rgb;
+		if (popup_aep->ae_u.cterm.bg_rgb != INVALCOLOR)
+		{
+		    // Blend popup bg toward underlying bg
+		    guicolor_T underlying_bg = INVALCOLOR;
+		    if (char_aep != NULL)
+			underlying_bg = char_aep->ae_u.cterm.bg_rgb;
+		    new_en.ae_u.cterm.bg_rgb = blend_colors(
+			    popup_aep->ae_u.cterm.bg_rgb,
+			    underlying_bg, blend);
+		}
+#endif
+	    }
+	}
+	return get_attr_entry(&cterm_attr_table, &new_en);
+    }
+
+    if (char_attr > HL_ALL)
+	char_aep = syn_term_attr2entry(char_attr);
+    if (char_aep != NULL)
+	new_en = *char_aep;
+    else
+    {
+	CLEAR_FIELD(new_en);
+	if (char_attr <= HL_ALL)
+	    new_en.ae_attr = char_attr;
+    }
+
+    // For term mode, no separate background color handling.
+    return get_attr_entry(&term_attr_table, &new_en);
+}
+
+/*
+ * Blend for pum opacity space cells: keep underlying fg, blend bg.
+ * This is different from hl_blend_attr(blend_fg=TRUE) where fg blends
+ * in the wrong direction for pum use.
+ */
+    int
+hl_pum_blend_attr(int char_attr, int popup_attr, int blend UNUSED)
+{
+    attrentry_T *char_aep = NULL;
+    attrentry_T *popup_aep;
+    attrentry_T new_en;
+
+#ifdef FEAT_GUI
+    if (gui.in_use)
+    {
+	if (char_attr > HL_ALL)
+	    char_aep = syn_gui_attr2entry(char_attr);
+	if (char_aep != NULL)
+	    new_en = *char_aep;
+	else
+	{
+	    CLEAR_FIELD(new_en);
+	    new_en.ae_u.gui.fg_color = INVALCOLOR;
+	    new_en.ae_u.gui.bg_color = INVALCOLOR;
+	    new_en.ae_u.gui.sp_color = INVALCOLOR;
+	    if (char_attr <= HL_ALL)
+		new_en.ae_attr = char_attr;
+	}
+	if (popup_attr > HL_ALL)
+	{
+	    popup_aep = syn_gui_attr2entry(popup_attr);
+	    if (popup_aep != NULL)
+	    {
+		// Blend fg: pum_bg toward underlying_fg.
+		// blend=0 (opaque): fg = pum_bg (text hidden)
+		// blend=100 (transparent): fg = underlying_fg (text visible)
+		if (popup_aep->ae_u.gui.bg_color != INVALCOLOR)
+		{
+		    int base_fg = 0xFFFFFF;
+		    if (char_aep != NULL
+			    && char_aep->ae_u.gui.fg_color != INVALCOLOR)
+			base_fg = char_aep->ae_u.gui.fg_color;
+		    new_en.ae_u.gui.fg_color = blend_colors(
+			    popup_aep->ae_u.gui.bg_color, base_fg, blend);
+		}
+		// Blend bg: popup bg toward underlying bg.
+		if (popup_aep->ae_u.gui.bg_color != INVALCOLOR)
+		{
+		    guicolor_T underlying_bg = INVALCOLOR;
+		    if (char_aep != NULL)
+			underlying_bg = char_aep->ae_u.gui.bg_color;
+		    new_en.ae_u.gui.bg_color = blend_colors(
+			    popup_aep->ae_u.gui.bg_color,
+			    underlying_bg, blend);
+		}
+	    }
+	}
+	return get_attr_entry(&gui_attr_table, &new_en);
+    }
+#endif
+
+    if (IS_CTERM)
+    {
+	if (char_attr > HL_ALL)
+	    char_aep = syn_cterm_attr2entry(char_attr);
+	if (char_aep != NULL)
+	    new_en = *char_aep;
+	else
+	{
+	    CLEAR_FIELD(new_en);
+#ifdef FEAT_TERMGUICOLORS
+	    new_en.ae_u.cterm.bg_rgb = INVALCOLOR;
+	    new_en.ae_u.cterm.fg_rgb = INVALCOLOR;
+	    new_en.ae_u.cterm.ul_rgb = INVALCOLOR;
+#endif
+	    if (char_attr <= HL_ALL)
+		new_en.ae_attr = char_attr;
+	}
+	if (popup_attr > HL_ALL)
+	{
+	    popup_aep = syn_cterm_attr2entry(popup_attr);
+	    if (popup_aep != NULL)
+	    {
+		// Blend cterm fg: use popup bg (hides text when opaque)
+		if (popup_aep->ae_u.cterm.fg_color > 0)
+		    new_en.ae_u.cterm.fg_color =
+					popup_aep->ae_u.cterm.fg_color;
+		// Use popup cterm bg.
+		if (popup_aep->ae_u.cterm.bg_color > 0)
+		    new_en.ae_u.cterm.bg_color =
+					popup_aep->ae_u.cterm.bg_color;
+#ifdef FEAT_TERMGUICOLORS
+		// Blend fg_rgb: pum_bg toward underlying_fg.
+		if (popup_aep->ae_u.cterm.bg_rgb != INVALCOLOR)
+		{
+		    int base_fg = 0xFFFFFF;
+		    if (char_aep != NULL
+			    && char_aep->ae_u.cterm.fg_rgb != INVALCOLOR)
+			base_fg = char_aep->ae_u.cterm.fg_rgb;
+		    new_en.ae_u.cterm.fg_rgb = blend_colors(
+			    popup_aep->ae_u.cterm.bg_rgb, base_fg, blend);
+		}
+		// Blend bg_rgb.
+		if (popup_aep->ae_u.cterm.bg_rgb != INVALCOLOR)
+		{
+		    guicolor_T underlying_bg = INVALCOLOR;
+		    if (char_aep != NULL)
+			underlying_bg = char_aep->ae_u.cterm.bg_rgb;
+		    new_en.ae_u.cterm.bg_rgb = blend_colors(
+			    popup_aep->ae_u.cterm.bg_rgb,
+			    underlying_bg, blend);
+		}
+#endif
+	    }
+	}
+	return get_attr_entry(&cterm_attr_table, &new_en);
+    }
+
+    // term mode
+    if (char_attr > HL_ALL)
+	char_aep = syn_term_attr2entry(char_attr);
+    if (char_aep != NULL)
+	new_en = *char_aep;
+    else
+    {
+	CLEAR_FIELD(new_en);
+	if (char_attr <= HL_ALL)
+	    new_en.ae_attr = char_attr;
+    }
+    return get_attr_entry(&term_attr_table, &new_en);
+}
+
 #ifdef FEAT_GUI
     attrentry_T *
 syn_gui_attr2entry(int attr)
@@ -3287,11 +3659,11 @@ highlight_has_attr(
     if (id <= 0 || id > highlight_ga.ga_len)
 	return NULL;
 
-#if defined(FEAT_GUI) || defined(FEAT_EVAL)
+# if defined(FEAT_GUI) || defined(FEAT_EVAL)
     if (modec == 'g')
 	attr = HL_TABLE()[id - 1].sg_gui;
     else
-#endif
+# endif
     {
 	if (modec == 'c')
 	    attr = HL_TABLE()[id - 1].sg_cterm;
@@ -3447,7 +3819,7 @@ syn_list_header(
 	name_col = msg_col;
 	endcol = 15;
     }
-    else if (msg_col + outlen + 1 >= Columns)
+    else if (msg_col + outlen + 1 >= cmdline_width)
     {
 	msg_putchar('\n');
 	if (got_int)
@@ -3461,15 +3833,15 @@ syn_list_header(
 
     if (msg_col >= endcol)	// output at least one space
 	endcol = msg_col + 1;
-    if (Columns <= (long)endcol)	// avoid hang for tiny window
-	endcol = (int)(Columns - 1);
+    if (cmdline_width <= endcol)	// avoid hang for tiny window
+	endcol = cmdline_width - 1;
 
     msg_advance(endcol);
 
     // Show "xxx" with the attributes.
     if (!did_header)
     {
-	if (endcol == Columns - 1 && endcol <= name_col)
+	if (endcol == cmdline_width - 1 && endcol <= name_col)
 	    msg_putchar(' ');
 	msg_puts_attr("xxx", syn_id2attr(id));
 	msg_putchar(' ');
@@ -3536,11 +3908,11 @@ set_hl_attr(
     // highlighting attributes, need to allocate an attr number.
     if (sgp->sg_cterm_fg == 0 && sgp->sg_cterm_bg == 0 &&
 	sgp->sg_cterm_ul == 0 && sgp->sg_cterm_font == 0
-# ifdef FEAT_TERMGUICOLORS
+#ifdef FEAT_TERMGUICOLORS
 	    && sgp->sg_gui_fg == INVALCOLOR
 	    && sgp->sg_gui_bg == INVALCOLOR
 	    && sgp->sg_gui_sp == INVALCOLOR
-# endif
+#endif
 	    )
 	sgp->sg_cterm_attr = sgp->sg_cterm;
     else
@@ -3550,7 +3922,7 @@ set_hl_attr(
 	at_en.ae_u.cterm.bg_color = sgp->sg_cterm_bg;
 	at_en.ae_u.cterm.ul_color = sgp->sg_cterm_ul;
 	at_en.ae_u.cterm.font = sgp->sg_cterm_font;
-# ifdef FEAT_TERMGUICOLORS
+#ifdef FEAT_TERMGUICOLORS
 	at_en.ae_u.cterm.fg_rgb = GUI_MCH_GET_RGB2(sgp->sg_gui_fg);
 	at_en.ae_u.cterm.bg_rgb = GUI_MCH_GET_RGB2(sgp->sg_gui_bg);
 	// Only use the underline/undercurl color when used, it may clear the
@@ -3568,9 +3940,46 @@ set_hl_attr(
 	    at_en.ae_u.cterm.fg_rgb = CTERMCOLOR;
 	    at_en.ae_u.cterm.bg_rgb = CTERMCOLOR;
 	}
-# endif
+#endif
 	sgp->sg_cterm_attr = get_attr_entry(&cterm_attr_table, &at_en);
     }
+}
+
+/*
+ * Check if highlight id is overridden, and return the overriding highlight id.
+ * Otherwise return the original id if no override.
+ */
+    static int
+syn_override(int id)
+{
+    if (overrides != NULL && overrides->arr != NULL)
+	for (int k = 0; k < overrides->len; k++)
+	    if (overrides->arr[k].from == id)
+		return overrides->arr[k].to;
+    return id;
+}
+
+/*
+ * Lookup a highlight group name by pointer and length.
+ * If it is not found, 0 is returned.
+ */
+    static int
+syn_name2id_len(char_u *name, int len)
+{
+    char_u	name_u[MAX_SYN_NAME + 1];
+    hashitem_T	*hi;
+
+    if (len > MAX_SYN_NAME)
+	len = MAX_SYN_NAME;
+    mch_memmove(name_u, name, len);
+    name_u[len] = NUL;
+    vim_strup(name_u);
+    if (!highlight_ht_inited)
+	return 0;
+    hi = hash_find(&highlight_ht, name_u);
+    if (HASHITEM_EMPTY(hi))
+	return 0;
+    return HI2HLNAME(hi)->hn_id;
 }
 
 /*
@@ -3580,19 +3989,8 @@ set_hl_attr(
     int
 syn_name2id(char_u *name)
 {
-    int		i;
-    char_u	name_u[MAX_SYN_NAME + 1];
-
-    // Avoid using stricmp() too much, it's slow on some systems
-    // Avoid alloc()/free(), these are slow too.  ID names over 200 chars
-    // don't deserve to be found!
-    vim_strncpy(name_u, name, MAX_SYN_NAME);
-    vim_strup(name_u);
-    for (i = highlight_ga.ga_len; --i >= 0; )
-	if (HL_TABLE()[i].sg_name_u != NULL
-		&& STRCMP(name_u, HL_TABLE()[i].sg_name_u) == 0)
-	    break;
-    return i + 1;
+    // Avoid using stricmp() too much, it's slow on some systems.
+    return syn_name2id_len(name, (int)STRLEN(name));
 }
 
 /*
@@ -3640,16 +4038,7 @@ syn_id2name(int id)
     int
 syn_namen2id(char_u *linep, int len)
 {
-    char_u  *name;
-    int	    id = 0;
-
-    name = vim_strnsave(linep, len);
-    if (name == NULL)
-	return 0;
-
-    id = syn_name2id(name);
-    vim_free(name);
-    return id;
+    return syn_name2id_len(linep, len);
 }
 
 /*
@@ -3669,15 +4058,14 @@ syn_check_group(char_u *pp, int len)
 	emsg(_(e_highlight_group_name_too_long));
 	return 0;
     }
-    name = vim_strnsave(pp, len);
-    if (name == NULL)
-	return 0;
-
-    id = syn_name2id(name);
+    id = syn_name2id_len(pp, len);
     if (id == 0)			// doesn't exist yet
+    {
+	name = vim_strnsave(pp, len);
+	if (name == NULL)
+	    return 0;
 	id = syn_add_group(name);
-    else
-	vim_free(name);
+    }
     return id;
 }
 
@@ -3716,6 +4104,8 @@ syn_add_group(char_u *name)
     {
 	highlight_ga.ga_itemsize = sizeof(hl_group_T);
 	highlight_ga.ga_growsize = 10;
+	hash_init(&highlight_ht);
+	highlight_ht_inited = true;
     }
 
     if (highlight_ga.ga_len >= MAX_HL_ID)
@@ -3732,11 +4122,20 @@ syn_add_group(char_u *name)
 	return 0;
     }
 
-    name_up = vim_strsave_up(name);
-    if (name_up == NULL)
     {
-	vim_free(name);
-	return 0;
+	hlname_T    *hn;
+	int	    len = (int)STRLEN(name);
+
+	hn = alloc(offsetof(hlname_T, hn_key) + len + 1);
+	if (hn == NULL)
+	{
+	    vim_free(name);
+	    return 0;
+	}
+	vim_strncpy(hn->hn_key, name, len);
+	vim_strup(hn->hn_key);
+	hn->hn_id = highlight_ga.ga_len + 1;	// ID is index plus one
+	name_up = hn->hn_key;
     }
 
     CLEAR_POINTER(&(HL_TABLE()[highlight_ga.ga_len]));
@@ -3747,6 +4146,7 @@ syn_add_group(char_u *name)
     HL_TABLE()[highlight_ga.ga_len].sg_gui_fg = INVALCOLOR;
     HL_TABLE()[highlight_ga.ga_len].sg_gui_sp = INVALCOLOR;
 #endif
+    hash_add(&highlight_ht, name_up, "highlight");
     ++highlight_ga.ga_len;
 
     return highlight_ga.ga_len;		    // ID is index plus one
@@ -3759,9 +4159,14 @@ syn_add_group(char_u *name)
     static void
 syn_unadd_group(void)
 {
+    hashitem_T *hi;
+
     --highlight_ga.ga_len;
+    hi = hash_find(&highlight_ht, HL_TABLE()[highlight_ga.ga_len].sg_name_u);
+    if (!HASHITEM_EMPTY(hi))
+	hash_remove(&highlight_ht, hi, "highlight");
     vim_free(HL_TABLE()[highlight_ga.ga_len].sg_name);
-    vim_free(HL_TABLE()[highlight_ga.ga_len].sg_name_u);
+    vim_free(HL_TABLE()[highlight_ga.ga_len].sg_name_u - HLNAME_KEY_OFF);
 }
 
 /*
@@ -3848,13 +4253,20 @@ syn_get_final_id(int hl_id)
     // Look out for loops!  Break after 100 links.
     for (count = 100; --count >= 0; )
     {
+	int tmp = hl_id;
+
 	sgp = &HL_TABLE()[hl_id - 1];	    // index is ID minus one
 	if (sgp->sg_link == 0 || sgp->sg_link > highlight_ga.ga_len)
 	    break;
+
+	// This is to handle highlight groups that are overridden but are in the
+	// middle of a link chain.
+	hl_id = syn_override(hl_id);
+	if (tmp != hl_id)
+	    continue;
 	hl_id = sgp->sg_link;
     }
-
-    return hl_id;
+    return syn_override(hl_id);
 }
 
 #if defined(FEAT_GUI) || defined(FEAT_TERMGUICOLORS)
@@ -3941,9 +4353,9 @@ combine_stl_hlt(
 	CLEAR_POINTER(&hlt[hlcnt + i]);
 	hlt[hlcnt + i].sg_term = highlight_attr[hlf];
 	hlt[hlcnt + i].sg_cterm = highlight_attr[hlf];
-#  if defined(FEAT_GUI) || defined(FEAT_EVAL)
+# if defined(FEAT_GUI) || defined(FEAT_EVAL)
 	hlt[hlcnt + i].sg_gui = highlight_attr[hlf];
-#  endif
+# endif
     }
     else
 	mch_memmove(&hlt[hlcnt + i],
@@ -3965,11 +4377,11 @@ combine_stl_hlt(
 	hlt[hlcnt + i].sg_cterm_bg = hlt[id - 1].sg_cterm_bg;
     if (hlt[id - 1].sg_cterm_font != hlt[id_S - 1].sg_cterm_font)
 	hlt[hlcnt + i].sg_cterm_font = hlt[id - 1].sg_cterm_font;
-#  if defined(FEAT_GUI) || defined(FEAT_EVAL)
+# if defined(FEAT_GUI) || defined(FEAT_EVAL)
     hlt[hlcnt + i].sg_gui ^=
 	hlt[id - 1].sg_gui ^ hlt[id_S - 1].sg_gui;
-#  endif
-#  ifdef FEAT_GUI
+# endif
+# ifdef FEAT_GUI
     if (hlt[id - 1].sg_gui_fg != hlt[id_S - 1].sg_gui_fg)
 	hlt[hlcnt + i].sg_gui_fg = hlt[id - 1].sg_gui_fg;
     if (hlt[id - 1].sg_gui_bg != hlt[id_S - 1].sg_gui_bg)
@@ -3978,11 +4390,11 @@ combine_stl_hlt(
 	hlt[hlcnt + i].sg_gui_sp = hlt[id - 1].sg_gui_sp;
     if (hlt[id - 1].sg_font != hlt[id_S - 1].sg_font)
 	hlt[hlcnt + i].sg_font = hlt[id - 1].sg_font;
-#   ifdef FEAT_XFONTSET
+#  ifdef FEAT_XFONTSET
     if (hlt[id - 1].sg_fontset != hlt[id_S - 1].sg_fontset)
 	hlt[hlcnt + i].sg_fontset = hlt[id - 1].sg_fontset;
-#   endif
 #  endif
+# endif
     highlight_ga.ga_len = hlcnt + i + 1;
     set_hl_attr(hlcnt + i);	// At long last we can apply
     table[i] = syn_id2attr(hlcnt + i + 1);
@@ -4003,6 +4415,7 @@ highlight_changed(void)
     int		hlf;
     int		i;
     char_u	*p;
+    char_u	*default_hl;
     int		attr;
     char_u	*end;
     int		id;
@@ -4018,27 +4431,39 @@ highlight_changed(void)
     int		hlcnt;
 # endif
 #endif
-    static int	hl_flags[HLF_COUNT] = HL_FLAGS;
+    win_T	*wp;
 
     need_highlight_changed = FALSE;
 
 #ifdef FEAT_TERMINAL
     term_update_colors_all();
-    term_update_wincolor_all();
+    term_update_hlfwin_all();
 #endif
 
     // Clear all attributes.
     for (hlf = 0; hlf < (int)HLF_COUNT; ++hlf)
+    {
 	highlight_attr[hlf] = 0;
+	highlight_attr_raw[hlf] = 0;
+	highlight_ids[hlf] = 0;
+    }
+
+    default_hl = get_highlight_default();
 
     // First set all attributes to their default value.
-    // Then use the attributes from the 'highlight' option.
+    // Then use the attributes from the 'highlight' option, unless it already
+    // matches the default and would repeat the same work.
     for (i = 0; i < 2; ++i)
     {
 	if (i)
+	{
+	    if (default_hl != NULL && p_hl != NULL
+				      && STRCMP(default_hl, p_hl) == 0)
+		continue;
 	    p = p_hl;
+	}
 	else
-	    p = get_highlight_default();
+	    p = default_hl;
 	if (p == NULL)	    // just in case
 	    continue;
 
@@ -4054,6 +4479,7 @@ highlight_changed(void)
 	    // Allow several hl_flags to be combined, like "bu" for
 	    // bold-underlined.
 	    attr = 0;
+	    id = 0;
 	    for ( ; *p && *p != ','; ++p)	    // parse up to comma
 	    {
 		if (VIM_ISWHITE(*p))		    // ignore white space
@@ -4116,10 +4542,25 @@ highlight_changed(void)
 		}
 	    }
 	    highlight_attr[hlf] = attr;
+	    highlight_attr_raw[hlf] = attr;
+	    highlight_ids[hlf] = id;
 
 	    p = skip_to_option_part(p);	    // skip comma and spaces
 	}
     }
+
+    // Highlight ids may have been changed, so keep windows up to date
+    FOR_ALL_WINDOWS(wp)
+    {
+	char *errmsg = update_winhighlight(wp, wp->w_p_whl);
+
+	if (errmsg != NULL)
+	    emsg(_(errmsg));
+    }
+
+#ifdef FEAT_TERMINAL
+    term_update_hlfwin_all();
+#endif
 
 #ifdef USER_HIGHLIGHT
     // Setup the user highlights
@@ -4755,7 +5196,7 @@ highlight_get_info(int hl_idx, int resolve_link)
     if (dict_add_number(dict, "id", hlgid) == FAIL)
 	goto error;
 
-    if (sgp->sg_link && resolve_link)
+    if (resolve_link)
     {
 	// resolve the highlight group link recursively
 	while (sgp->sg_link)
@@ -4982,7 +5423,7 @@ hldict_attr_to_str(
 // Temporary buffer used to store the command string produced by hlset().
 // IObuff cannot be used for this as the error messages produced by hlset()
 // internally use IObuff.
-#define	HLSETBUFSZ  512
+# define	HLSETBUFSZ  512
 static char_u hlsetBuf[HLSETBUFSZ + 1];
 
 /*
@@ -5000,7 +5441,23 @@ add_attr_and_value(char_u *dptr, char_u *attr, int attrlen, char_u *value)
 	return dptr;
 
     vallen = STRLEN(value);
-    if (dptr + attrlen + vallen + 1 < hlsetBuf + HLSETBUFSZ)
+    // When the value contains a space and the attribute has an "=" (i.e. it
+    // is a key=value pair), surround the value with single quotes so that
+    // do_highlight() can parse it correctly.
+    if (vim_strchr(value, ' ') != NULL && vim_strchr(attr, '=') != NULL)
+    {
+	if (dptr + attrlen + vallen + 3 < hlsetBuf + HLSETBUFSZ)
+	{
+	    STRCPY(dptr, attr);
+	    dptr += attrlen;
+	    *dptr++ = '\'';
+	    STRCPY(dptr, value);
+	    dptr += vallen;
+	    *dptr++ = '\'';
+	    *dptr = NUL;
+	}
+    }
+    else if (dptr + attrlen + vallen + 1 < hlsetBuf + HLSETBUFSZ)
     {
 	STRCPY(dptr, attr);
 	dptr += attrlen;
@@ -5161,7 +5618,7 @@ hlg_add_or_update(dict_T *dict)
     p = add_attr_and_value(p, (char_u *)" ctermfg=", 9, ctermfg);
     p = add_attr_and_value(p, (char_u *)" ctermbg=", 9, ctermbg);
     p = add_attr_and_value(p, (char_u *)" ctermul=", 9, ctermul);
-    p = add_attr_and_value(p, (char_u *)" ctermfont=", 9, ctermfont);
+    p = add_attr_and_value(p, (char_u *)" ctermfont=", 11, ctermfont);
     p = add_attr_and_value(p, (char_u *)" gui=", 5, gui_attr);
 # ifdef FEAT_GUI
     p = add_attr_and_value(p, (char_u *)" font=", 6, font);
@@ -5206,3 +5663,390 @@ f_hlset(typval_T *argvars, typval_T *rettv)
     rettv->vval.v_number = 0;
 }
 #endif
+
+/*
+ * If "old" is in the override stack, then update it to "hl_new". Does not free
+ * "old".
+ */
+    void
+update_highlight_overrides(hl_override_T *old, hl_override_T *hl_new, int newlen)
+{
+    if (old == NULL)
+	return;
+
+    for (hl_overrides_T *set = overrides; set != NULL; set = set->next)
+    {
+	if (set->arr == old)
+	{
+	    set->arr = hl_new;
+	    set->len = newlen;
+	}
+    }
+}
+
+/*
+ * If "arr" is in the highlight overrides list, then mark it as invalid.
+ */
+    void
+remove_highlight_overrides(hl_override_T *arr)
+{
+    if (arr == NULL || overrides == NULL)
+	return;
+
+    for (hl_overrides_T *set = overrides; set != NULL; set = set->next)
+    {
+	if (set->arr == arr)
+	{
+	    set->arr = NULL;
+	    break;
+	}
+    }
+}
+
+/*
+ * Update highlight_attr[] array. If "update_ids" is true, then update
+ * highlight_ids[] array instead.
+ */
+    static void
+set_highlight_attr(hl_override_T *arr, int len, bool update_ids)
+{
+    for (int i = 0; i < len; i++)
+    {
+	hl_override_T	*override = arr + i;
+	int		hlf = -1, attr;
+
+	if (override->from <= 0)
+	    // Directly map to highlight_attr
+	    hlf = -override->from;
+	else
+	{
+	    for (int k = 0; k < HLF_COUNT; k++)
+		if (override->from == highlight_ids[k])
+		{
+		    hlf = k;
+		    break;
+		}
+
+	    if (hlf == -1)
+		continue;
+	}
+
+	if (update_ids)
+	{
+	    if (override->to <= 0)
+	    {
+		if (hlf == -override->to)
+		    highlight_ids[hlf] = -1;
+		else
+		    highlight_ids[hlf] = highlight_ids[-override->to];
+	    }
+	    else
+		highlight_ids[hlf] = override->to;
+	}
+	else
+	{
+	    if (override->to <= 0)
+		// Directly use highlight_attr[]
+		attr = highlight_attr[-override->to];
+	    else
+		attr = syn_id2attr(override->to);
+
+	    highlight_attr[hlf] = attr;
+	}
+    }
+}
+
+/*
+ * Set the current highlight override to "arr". Returns true if successful
+ */
+    bool
+push_highlight_overrides(hl_override_T *arr, int len)
+{
+    // Don't want to do anything if "arr" is NULL or if "arr" is already the
+    // current override.
+    if (arr == NULL || (overrides != NULL && overrides->arr == arr))
+	return false;
+
+    hl_overrides_T *set;
+
+    set = ALLOC_ONE(hl_overrides_T);
+    if (set == NULL)
+	return false;
+
+    set->arr = arr;
+    set->len = len;
+
+    // Push to front of list
+    set->next = overrides;
+    overrides = set;
+
+    // Save current highlight_attr[], so it can be restored later after this
+    // override is popped.
+    memcpy(set->attr, highlight_attr, sizeof(highlight_attr));
+
+    // Reset highlight_attr[] to default values, as we don't want changes from
+    // other overrides.
+    memcpy(highlight_attr, highlight_attr_raw, sizeof(highlight_attr));
+
+    // Update highlight_attr[] array
+    set_highlight_attr(arr, len, false);
+
+    return true;
+}
+
+/*
+ * Pop the current highlight override (if any) from the stack. This should
+ * always be paired with a *successful* push.
+ */
+    void
+pop_highlight_overrides(void)
+{
+    hl_overrides_T *set = overrides;
+
+    if (overrides == NULL)
+	return;
+
+    overrides = set->next;
+
+    // Set highlight_attr[] to state before override was pushed.
+    memcpy(highlight_attr, set->attr, sizeof(highlight_attr));
+    vim_free(set);
+}
+
+/*
+ * Parse the 'winhighlight' option and return array. Returns NULL on failure or
+ * if empty option. If failure, then errmsg is set.
+ */
+    static hl_override_T *
+parse_winhighlight(char_u *opt, int *len, char **errmsg)
+{
+    char_u	    *p = opt;
+    hl_override_T   *arr;
+    int		    i = 0;
+    int		    num = 1;
+    int		    n_colons = 0;
+
+    if (*p == NUL)
+	return NULL;
+
+    // Get number of overrides first so we can allocate array
+    while ((p = vim_strchr(p, ',')) != NULL)
+    {
+	p++;
+	num++;
+    }
+    p = opt;
+    // Check if number of ':' matches number of ','
+    while ((p = vim_strchr(p, ':')) != NULL)
+    {
+	p++;
+	n_colons++;
+    }
+
+    if (num != n_colons)
+    {
+	*errmsg = e_invalid_argument;
+	return NULL;
+    }
+
+    arr = ALLOC_MULT(hl_override_T, num);
+    if (arr == NULL)
+    {
+	*errmsg = e_out_of_memory;
+	return NULL;
+    }
+
+    p = opt;
+
+    while (true)
+    {
+	hl_override_T *override = arr + i++;
+	char_u	*fromname = p, *toname;
+	char_u	*tmp;
+	char_u	**names[2] = {&fromname, &toname};
+	int	fromlen, tolen;
+	int	*lens[2] = {&fromlen, &tolen};
+	int	fromid, toid;
+	int	*ids[2] = {&fromid, &toid};
+
+	p = vim_strchr(p, ':');
+
+	if (p == NULL)
+	    goto fail;
+
+	fromlen = p - fromname; // Get hl for "from"
+	if (fromlen == 0)
+	    goto fail;
+	p++; // Skip colon ':'
+	if (*p == NUL)
+	    goto fail;
+
+	toname = p;
+	tmp = vim_strchr(p, ',');
+
+	// Get hl for "to", must check for no trailing comma in case last
+	// element.
+	if (tmp == NULL)
+	    tolen = (int)STRLEN(p);
+	else
+	{
+	    tolen = tmp - toname;
+	    p = ++tmp;
+	}
+	if (tolen == 0)
+	    goto fail;
+
+	for (int k = 0; k < 2; k++)
+	{
+	    char_u  *name = *names[k];
+	    int	    nlen = *lens[k];
+
+	    if (*name == '!')
+	    {
+		// If starts with "!", then it maps directly to a 'highlight'
+		// occasion.
+		int hlf;
+
+		if (nlen != 2)
+		    goto fail;
+
+		for (hlf = 0; hlf < (int)HLF_COUNT; ++hlf)
+		    if (hl_flags[hlf] == name[1])
+			break;
+
+		if (hlf >= HLF_COUNT)
+		    goto fail;
+
+		*ids[k] = -hlf;
+	    }
+	    else
+	    {
+		// Otherwise get the highlight group id.
+		if (syn_check_group(name, nlen) == 0)
+		    goto fail;
+
+		*ids[k] = syn_namen2id(name, nlen);
+		if (*ids[k] == 0)
+		    goto fail;
+
+		// Always map "Normal" group to HLF_WIN
+		if (ids[k] == &fromid &&
+			STRCMP(HL_TABLE()[*ids[k] - 1].sg_name_u, "NORMAL") == 0)
+		    *ids[k] = -HLF_WIN;
+	    }
+	}
+
+	// If fromid == toid, leave it be, this is so that we know HLF_WIN has
+	// been set (even to itself e.g. "Normal"), and therefore know to use
+	// its attr instead.
+	override->from = fromid;
+	override->to = toid;
+
+	if (tmp == NULL)
+	    break;
+    }
+
+    *len = num;
+    return arr;
+fail:
+    vim_free(arr);
+    *errmsg = e_invalid_argument;
+    return NULL;
+}
+
+/*
+ * Update w_hl for "wp" using given option value. Returns error
+ * message on failure, otherwise NULL.
+ */
+    char *
+update_winhighlight(win_T *wp, char_u *opt)
+{
+    char	    *err = NULL;
+    hl_override_T   *arr;
+    int		    num = 1;
+
+    arr = parse_winhighlight(opt, &num, &err);
+
+    if (arr == NULL && err != NULL)
+	return err;
+
+    if (arr == NULL && wp->w_hl == NULL)
+	return NULL;
+
+    update_highlight_overrides(wp->w_hl, arr, num);
+
+    vim_free(wp->w_hl);
+    wp->w_hl = arr;
+    wp->w_hl_len = num;
+
+    wp->w_hlfwin_id = hlf_get_id(wp, HLF_WIN);
+
+#ifdef FEAT_TERMINAL
+    term_update_hlfwin(wp);
+#endif
+
+#ifdef FEAT_TERMINAL
+    // May be NULL (such as in after_copy_winopt())
+    if (wp->w_buffer != NULL)
+    {
+	// Make sure terminal highlighting is updated
+	bool ret = push_highlight_overrides(wp->w_hl, wp->w_hl_len);
+
+	if (wp->w_buffer->b_term != NULL)
+	    term_init_default_colors(wp->w_buffer->b_term);
+	if (ret)
+	    pop_highlight_overrides();
+    }
+#endif
+
+    return NULL;
+}
+
+/*
+ * Get id that the hlf attr is using in window "wp", otherwise zero. Note that
+ * -1 may be returned if the hlf was set to itself.
+ */
+    int
+hlf_get_id(win_T *wp, int hlf)
+{
+    int id;
+    static int prev[HLF_COUNT];
+
+    if (wp->w_hl == NULL)
+	return highlight_ids[hlf];
+
+    memcpy(prev, highlight_ids, sizeof(highlight_ids));
+    set_highlight_attr(wp->w_hl, wp->w_hl_len, true);
+    id = highlight_ids[hlf];
+    memcpy(highlight_ids, prev, sizeof(highlight_ids));
+
+    return id;
+}
+
+/*
+ * Update 'winhighlight' using a 'wincolor' style option value. Returns error
+ * message on failure otherwise NULL. Does not update the actual 'wincolor'
+ * value, but does update the 'winhighlight' value.
+ */
+    char *
+update_wincolor(win_T *wp, char_u *opt)
+{
+    char_u  *str = *opt == NUL ? "" : alloc(sizeof("!(:") + STRLEN(opt));
+    char    *errmsg;
+
+    if (str == NULL)
+	return e_out_of_memory;
+
+    if (*opt != NUL)
+	sprintf((char *)str, "!(:%s", opt);
+
+    errmsg = update_winhighlight(wp, str);
+
+    if (errmsg == NULL)
+	set_string_option_direct_in_win(wp, (char_u *)"winhighlight", -1,
+		str, OPT_FREE|OPT_LOCAL, 0);
+
+    if (*opt != NUL)
+	free(str);
+    return errmsg;
+}

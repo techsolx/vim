@@ -695,6 +695,9 @@ normal_cmd(
     int		idx;
     int		set_prevcount = FALSE;
     int		save_did_cursorhold = did_cursorhold;
+#ifdef FEAT_EVAL
+    int		did_visual_op = FALSE;
+#endif
 
     CLEAR_FIELD(ca);	// also resets ca.retval
     ca.oap = oap;
@@ -968,14 +971,18 @@ normal_cmd(
     if (old_mapped_len > 0)
 	old_mapped_len = typebuf_maplen();
 
-#ifdef FEAT_EVAL
-    int prev_VIsual_active = VIsual_active;
-#endif
-
     // If an operation is pending, handle it.  But not for K_IGNORE or
     // K_MOUSEMOVE.
     if (ca.cmdchar != K_IGNORE && ca.cmdchar != K_MOUSEMOVE)
+    {
+#ifdef FEAT_EVAL
+	did_visual_op = VIsual_active && oap->op_type != OP_NOP
+			// For OP_COLON, do_pending_operator() stuffs ':' into
+			// the read buffer, which isn't executed immediately.
+			&& oap->op_type != OP_COLON;
+#endif
 	do_pending_operator(&ca, old_col, FALSE);
+    }
 
     // Wait for a moment when a message is displayed that will be overwritten
     // by the mode message.
@@ -988,7 +995,7 @@ normal_end:
     msg_nowait = FALSE;
 
 #ifdef FEAT_EVAL
-    if (finish_op || prev_VIsual_active)
+    if (finish_op || did_visual_op)
 	reset_reg_var();
 #endif
 
@@ -1147,7 +1154,8 @@ end_visual_mode_keep_button(void)
     // we need to paste it somewhere while we still own the selection.
     // Only do this when the clipboard is already owned.  Don't want to grab
     // the selection when hitting ESC.
-    if (clip_star.available && clip_star.owned)
+    if ((clip_star.available && clip_star.owned)
+	    || (clip_plus.available && clip_plus.owned))
 	clip_auto_select();
 
 # if defined(FEAT_EVAL)
@@ -1608,7 +1616,8 @@ clear_showcmd(void)
     if (!p_sc)
 	return;
 
-    if (VIsual_active && !char_avail())
+    if (VIsual_active
+	&& stuff_empty() && typebuf.tb_len == 0 && !using_script())
     {
 	int		cursor_bot = LT_POS(VIsual, curwin->w_cursor);
 	long		lines;
@@ -1626,33 +1635,34 @@ clear_showcmd(void)
 	    top = curwin->w_cursor.lnum;
 	    bot = VIsual.lnum;
 	}
-# ifdef FEAT_FOLDING
+#ifdef FEAT_FOLDING
 	// Include closed folds as a whole.
 	(void)hasFolding(top, &top, NULL);
 	(void)hasFolding(bot, NULL, &bot);
-# endif
+#endif
 	lines = bot - top + 1;
 
 	if (VIsual_mode == Ctrl_V)
 	{
-# ifdef FEAT_LINEBREAK
+#ifdef FEAT_LINEBREAK
 	    char_u *saved_sbr = p_sbr;
 	    char_u *saved_w_sbr = curwin->w_p_sbr;
 
 	    // Make 'sbr' empty for a moment to get the correct size.
 	    p_sbr = empty_option;
 	    curwin->w_p_sbr = empty_option;
-# endif
-	    getvcols(curwin, &curwin->w_cursor, &VIsual, &leftcol, &rightcol);
-# ifdef FEAT_LINEBREAK
+#endif
+	    getvcols(curwin, &curwin->w_cursor, &VIsual,
+				    &leftcol, &rightcol, GETVCOL_END_EXCL_LBR);
+#ifdef FEAT_LINEBREAK
 	    p_sbr = saved_sbr;
 	    curwin->w_p_sbr = saved_w_sbr;
-# endif
-	    sprintf((char *)showcmd_buf, "%ldx%ld", lines,
+#endif
+	    vim_snprintf((char *)showcmd_buf, SHOWCMD_BUFLEN, "%ldx%ld", lines,
 					      (long)(rightcol - leftcol + 1));
 	}
 	else if (VIsual_mode == 'V' || VIsual.lnum != curwin->w_cursor.lnum)
-	    sprintf((char *)showcmd_buf, "%ld", lines);
+	    vim_snprintf((char *)showcmd_buf, SHOWCMD_BUFLEN, "%ld", lines);
 	else
 	{
 	    char_u  *s, *e;
@@ -1684,9 +1694,9 @@ clear_showcmd(void)
 		s += l;
 	    }
 	    if (bytes == chars)
-		sprintf((char *)showcmd_buf, "%d", chars);
+		vim_snprintf((char *)showcmd_buf, SHOWCMD_BUFLEN, "%d", chars);
 	    else
-		sprintf((char *)showcmd_buf, "%d-%d", chars, bytes);
+		vim_snprintf((char *)showcmd_buf, SHOWCMD_BUFLEN, "%d-%d", chars, bytes);
 	}
 	showcmd_buf[SHOWCMD_COLS] = NUL;	// truncate
 	showcmd_visual = TRUE;
@@ -1849,12 +1859,13 @@ display_showcmd(void)
     else // 'showcmdloc' is "last" or empty
     {
 	if (!showcmd_is_clear)
-	    screen_puts(showcmd_buf, (int)Rows - 1, sc_col, 0);
+	    screen_puts(showcmd_buf, (int)Rows - 1,
+		    cmdline_col_off + sc_col, 0);
 
 	// clear the rest of an old message by outputting up to SHOWCMD_COLS
 	// spaces
 	screen_puts((char_u *)"          " + len,
-						(int)Rows - 1, sc_col + len, 0);
+		(int)Rows - 1, cmdline_col_off + sc_col + len, 0);
     }
 
     setcursor();	    // put cursor back where it belongs
@@ -2755,7 +2766,7 @@ nv_zet(cmdarg_T *cap)
 			col = 0;	// like the cursor is in col 0
 		    else
 #endif
-		    getvcol(curwin, &curwin->w_cursor, &col, NULL, NULL);
+		    getvcol(curwin, &curwin->w_cursor, &col, NULL, NULL, 0);
 		    if ((long)col > siso)
 			col -= siso;
 		    else
@@ -2776,7 +2787,7 @@ nv_zet(cmdarg_T *cap)
 			col = 0;	// like the cursor is in col 0
 		    else
 #endif
-		    getvcol(curwin, &curwin->w_cursor, NULL, NULL, &col);
+		    getvcol(curwin, &curwin->w_cursor, NULL, NULL, &col, 0);
 		    n = curwin->w_width - curwin_col_off();
 		    if ((long)col + siso < n)
 			col = 0;
@@ -4285,7 +4296,7 @@ nv_csearch(cmdarg_T *cap)
     {
 	colnr_T	scol, ecol;
 
-	getvcol(curwin, &curwin->w_cursor, &scol, NULL, &ecol);
+	getvcol(curwin, &curwin->w_cursor, &scol, NULL, &ecol, 0);
 	curwin->w_cursor.coladd = ecol - scol;
     }
     else
@@ -4990,7 +5001,7 @@ v_swap_corners(int cmdchar)
     if (cmdchar == 'O' && VIsual_mode == Ctrl_V)
     {
 	old_cursor = curwin->w_cursor;
-	getvcols(curwin, &old_cursor, &VIsual, &left, &right);
+	getvcols(curwin, &old_cursor, &VIsual, &left, &right, 0);
 	curwin->w_cursor.lnum = VIsual.lnum;
 	coladvance(left);
 	VIsual = curwin->w_cursor;
@@ -5416,13 +5427,13 @@ nv_pcmark(cmdarg_T *cap)
     }
     else
 	clearopbeep(cap->oap);
-# ifdef FEAT_FOLDING
+#ifdef FEAT_FOLDING
     if (cap->oap->op_type == OP_NOP
 	    && (pos == (pos_T *)-1 || lnum != curwin->w_cursor.lnum)
 	    && (fdo_flags & FDO_MARK)
 	    && old_KeyTyped)
 	foldOpenCursor();
-# endif
+#endif
 }
 
 /*
@@ -5694,9 +5705,9 @@ nv_gv_cmd(cmdarg_T *cap)
 	i = VIsual_mode;
 	VIsual_mode = curbuf->b_visual.vi_mode;
 	curbuf->b_visual.vi_mode = i;
-# ifdef FEAT_EVAL
+#ifdef FEAT_EVAL
 	curbuf->b_visual_mode_eval = i;
-# endif
+#endif
 	i = curwin->w_curswant;
 	curwin->w_curswant = curbuf->b_visual.vi_curswant;
 	curbuf->b_visual.vi_curswant = i;
@@ -5917,7 +5928,7 @@ nv_g_dollar_cmd(cmdarg_T *cap)
 	{
 	    colnr_T vcol;
 
-	    getvvcol(curwin, &curwin->w_cursor, NULL, NULL, &vcol);
+	    getvvcol(curwin, &curwin->w_cursor, NULL, NULL, &vcol, 0);
 	    if (vcol >= curwin->w_leftcol + curwin->w_width - col_off)
 		--curwin->w_cursor.col;
 	}
@@ -5929,7 +5940,7 @@ nv_g_dollar_cmd(cmdarg_T *cap)
     {
 	do
 	    i = gchar_cursor();
-	while (VIM_ISWHITE(i) && oneleft() == OK);
+	while (IS_WHITE_OR_NUL(i) && oneleft() == OK);
 	curwin->w_valid &= ~VALID_WCOL;
     }
 }
@@ -6483,16 +6494,16 @@ nv_operator(cmdarg_T *cap)
     static void
 set_op_var(int optype)
 {
-    char_u	opchars[3];
-
     if (optype == OP_NOP)
 	set_vim_var_string(VV_OP, NULL, 0);
     else
     {
+	char_u	opchars[3];
+
 	opchars[0] = get_op_char(optype);
 	opchars[1] = get_extra_op_char(optype);
 	opchars[2] = NUL;
-	set_vim_var_string(VV_OP, opchars, -1);
+	set_vim_var_string(VV_OP, opchars, 2);
     }
 }
 #endif
@@ -6755,7 +6766,7 @@ unadjust_for_sel_inner(pos_T *pp)
 	mb_adjustpos(curbuf, pp);
 	if (virtual_active())
 	{
-	    getvcol(curwin, pp, &cs, NULL, &ce);
+	    getvcol(curwin, pp, &cs, NULL, &ce, 0);
 	    pp->coladd = ce - cs;
 	}
     }
@@ -6976,7 +6987,7 @@ nv_edit(cmdarg_T *cap)
     if (VIsual_active && (cap->cmdchar == 'A' || cap->cmdchar == 'I'))
     {
 #ifdef FEAT_TERMINAL
-	if (term_in_normal_mode())
+	if (term_in_normal_mode(curbuf))
 	{
 	    end_visual_mode();
 	    clearop(cap->oap);
@@ -6994,7 +7005,7 @@ nv_edit(cmdarg_T *cap)
 	nv_object(cap);
     }
 #ifdef FEAT_TERMINAL
-    else if (term_in_normal_mode())
+    else if (term_in_normal_mode(curbuf))
     {
 	clearop(cap->oap);
 	term_enter_job_mode();
@@ -7417,7 +7428,7 @@ nv_put_opt(cmdarg_T *cap, int fix_indent)
 	was_visual = TRUE;
 	regname = cap->oap->regname;
 	keep_registers = cap->cmdchar == 'P';
-#ifdef FEAT_CLIPBOARD
+#ifdef HAVE_CLIPMETHOD
 	adjust_clip_reg(&regname);
 #endif
 	if (regname == 0 || regname == '"'

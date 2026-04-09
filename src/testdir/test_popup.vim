@@ -1163,6 +1163,7 @@ func Test_popup_complete_info_02()
     \     {'word': 'Apr', 'menu': 'April', 'user_data': '', 'info': '', 'kind': '', 'abbr': ''},
     \     {'word': 'May', 'menu': 'May', 'user_data': '', 'info': '', 'kind': '', 'abbr': ''}
     \   ],
+    \   'preinserted_text': '',
     \   'selected': 0,
     \ }
 
@@ -1170,7 +1171,7 @@ func Test_popup_complete_info_02()
   call feedkeys("i\<C-X>\<C-U>\<F5>", 'tx')
   call assert_equal(d, g:compl_info)
 
-  let g:compl_what = ['mode', 'pum_visible', 'selected']
+  let g:compl_what = ['mode', 'pum_visible', 'preinserted_text', 'selected']
   call remove(d, 'items')
   call feedkeys("i\<C-X>\<C-U>\<F5>", 'tx')
   call assert_equal(d, g:compl_info)
@@ -1178,6 +1179,7 @@ func Test_popup_complete_info_02()
   let g:compl_what = ['mode']
   call remove(d, 'selected')
   call remove(d, 'pum_visible')
+  call remove(d, 'preinserted_text')
   call feedkeys("i\<C-X>\<C-U>\<F5>", 'tx')
   call assert_equal(d, g:compl_info)
   bwipe!
@@ -1191,6 +1193,7 @@ func Test_popup_complete_info_no_pum()
         \   'mode': '',
         \   'pum_visible': 0,
         \   'items': [],
+        \   'preinserted_text': '',
         \   'selected': -1,
         \  }
   call assert_equal( d, complete_info() )
@@ -1528,8 +1531,7 @@ endfunc
 func Test_pum_completefuzzycollect()
   CheckScreendump
   let lines =<< trim END
-    set completefuzzycollect=keyword,files
-    set completeopt=menu,menuone
+    set completeopt=menu,menuone,fuzzy
   END
   call writefile(lines, 'Xscript', 'D')
   let  buf = RunVimInTerminal('-S Xscript', {})
@@ -2382,6 +2384,85 @@ func Test_popup_border()
     endif
   endfor
 
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_popup_shadow_hiddenchar()
+  CheckScreendump
+
+  let lines =<< trim END
+    bold italic underline reverse normal
+    italic underline reverse normal bold
+    underline reverse normal bold italic
+    reverse normal bold italic underline
+    normal bold italic underline reverse
+  END
+  call writefile(lines, 'Xtest', 'D')
+  let buf = RunVimInTerminal('Xtest', {'cols': 75})
+
+  call term_sendkeys(buf, ":set completeopt=menuone,noselect pumborder=shadow\<CR>")
+  call term_sendkeys(buf, ":hi BoldGrp cterm=bold\<CR>")
+  call term_sendkeys(buf, ":hi ItalicGrp cterm=italic,underline\<CR>")
+  call term_sendkeys(buf, ":hi ReverseGrp cterm=reverse\<CR>")
+  call term_sendkeys(buf, ":call matchadd(\"BoldGrp\", \"bold\")\<CR>")
+  call term_sendkeys(buf, ":call matchadd(\"ItalicGrp\", \"italic\")\<CR>")
+  call term_sendkeys(buf, ":call matchadd(\"ItalicGrp\", \"underline\")\<CR>")
+  call term_sendkeys(buf, ":call matchadd(\"ReverseGrp\", \"reverse\")\<CR>")
+
+  call term_sendkeys(buf, "i\<C-N>")
+  call TermWait(buf, 10)
+  call VerifyScreenDump(buf, 'Test_popup_shadow_hiddenchar_1', {'rows': 8})
+  call term_sendkeys(buf, "\<Esc>wwi\<C-N>")
+  call TermWait(buf, 10)
+  call VerifyScreenDump(buf, 'Test_popup_shadow_hiddenchar_2', {'rows': 8})
+  call term_sendkeys(buf, "\<Esc>")
+
+  call StopVimInTerminal(buf)
+endfunc
+
+" Test pumopt opacity with screendump: background text should show through
+func Test_pumopt_opacity_screendump()
+  CheckScreendump
+  let lines =<< trim END
+    set pumopt=opacity:50
+    set completeopt=menu
+    call setline(1, ['hello world', 'hello vim', 'hello opacity', 'help me'])
+    for i in range(5)
+      call append(line('$'), repeat('BACKGROUND', 8))
+    endfor
+    normal gg
+  END
+  call writefile(lines, 'Xpumoptopacity', 'D')
+  let buf = RunVimInTerminal('-S Xpumoptopacity', {})
+  call TermWait(buf)
+  call term_sendkeys(buf, "Gohel\<C-N>")
+  call TermWait(buf, 100)
+  call VerifyScreenDump(buf, 'Test_pumopt_opacity_50', {})
+  call term_sendkeys(buf, "\<C-E>\<Esc>u")
+  call TermWait(buf)
+  call StopVimInTerminal(buf)
+endfunc
+
+" Test pumopt opacity:100 (fully opaque, same as default)
+func Test_pumopt_opacity_100()
+  CheckScreendump
+  let lines =<< trim END
+    set pumopt=opacity:100
+    set completeopt=menu
+    call setline(1, ['hello world', 'hello vim', 'hello opacity', 'help me'])
+    for i in range(5)
+      call append(line('$'), repeat('BACKGROUND', 8))
+    endfor
+    normal gg
+  END
+  call writefile(lines, 'Xpumoptopacity100', 'D')
+  let buf = RunVimInTerminal('-S Xpumoptopacity100', {})
+  call TermWait(buf)
+  call term_sendkeys(buf, "Gohel\<C-N>")
+  call TermWait(buf, 100)
+  call VerifyScreenDump(buf, 'Test_pumopt_opacity_100', {})
+  call term_sendkeys(buf, "\<C-E>\<Esc>u")
+  call TermWait(buf)
   call StopVimInTerminal(buf)
 endfunc
 
