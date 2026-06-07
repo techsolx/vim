@@ -198,7 +198,7 @@ main
     // Check if the current executable file is for the GUI subsystem.
     gui.starting = mch_is_gui_executable();
 #  elif defined(FEAT_GUI_MSWIN)
-    gui.starting = TRUE;
+    gui.starting = true;
 #  endif
 
 #  ifdef FEAT_CLIENTSERVER
@@ -228,7 +228,7 @@ main
      * :gui.
      */
 #  ifdef ALWAYS_USE_GUI
-    gui.starting = TRUE;
+    gui.starting = true;
 #  else
 #   if defined(FEAT_GUI_X11) || defined(FEAT_GUI_GTK)
     /*
@@ -239,7 +239,7 @@ main
     {
 	if (gui_init_check() == FAIL)
 	{
-	    gui.starting = FALSE;
+	    gui.starting = false;
 
 	    // When running "evim" or "gvim -y" we need the menus, exit if we
 	    // don't have them.
@@ -893,9 +893,6 @@ vim_main2(void)
 
     may_req_bg_color();
 # endif
-    // Same reason for termresponse, don't want the terminal sending out the
-    // DECRPM response after Vim has exited.
-    send_decrqm_modes();
 
     // start in insert mode
     if (p_im)
@@ -1038,7 +1035,14 @@ common_init_2(mparm_T *paramp)
 #endif
 
 #ifdef FEAT_GUI
-    gui.dofork = TRUE;		    // default is to use fork()
+    gui.dofork = true;		    // default is to use fork()
+#endif
+
+#ifdef FEAT_CLIENTSERVER_BACKENDS
+    /*
+     * Check the $VIM_CLIENTSERVER env before we handle the --clientserver arg
+     */
+    check_clientserver_method_env();
 #endif
 
     /*
@@ -1847,6 +1851,9 @@ getout(int exitval)
 #ifdef FEAT_NETBEANS_INTG
     netbeans_end();
 #endif
+#ifdef FEAT_SOCKETSERVER
+    socketserver_stop();
+#endif
 #ifdef FEAT_CSCOPE
     cs_end();
 #endif
@@ -1910,10 +1917,10 @@ early_arg_scan(mparm_T *parmp UNUSED)
 #  ifdef FEAT_GUI
 	    if (strstr(argv[i], "-wait") != 0)
 		// don't fork() when starting the GUI to edit files ourself
-		gui.dofork = FALSE;
+		gui.dofork = false;
 #  endif
 	}
-#  if defined(FEAT_X11) && defined(FEAT_SOCKETSERVER)
+#  ifdef FEAT_CLIENTSERVER_BACKENDS
 	else if (STRNICMP(argv[i], "--clientserver", 14) == 0)
 	{
 	    char_u *arg;
@@ -1923,8 +1930,14 @@ early_arg_scan(mparm_T *parmp UNUSED)
 
 	    if (STRICMP(arg, "socket") == 0)
 		clientserver_method = CLIENTSERVER_METHOD_SOCKET;
+#   ifdef FEAT_X11
 	    else if (STRICMP(arg, "x11") == 0)
 		clientserver_method = CLIENTSERVER_METHOD_X11;
+#   endif
+#   ifdef MSWIN
+	    else if (STRICMP(arg, "mswin") == 0)
+		clientserver_method = CLIENTSERVER_METHOD_MSWIN;
+#   endif
 	    else
 		mainerr(ME_UNKNOWN_OPTION, arg);
 	}
@@ -2027,7 +2040,7 @@ parse_command_name(mparm_T *parmp)
 		|| TOLOWER_ASC(initstr[1]) == 'g'))
     {
 # ifdef FEAT_GUI
-	gui.starting = TRUE;
+	gui.starting = true;
 # endif
 	parmp->evim_mode = TRUE;
 	++initstr;
@@ -2041,12 +2054,12 @@ parse_command_name(mparm_T *parmp)
 	++initstr;
 # endif
 # ifdef GUI_MAY_SPAWN
-	gui.dospawn = FALSE;	// No need to spawn a new process.
+	gui.dospawn = false;	// No need to spawn a new process.
 # endif
     }
 # ifdef GUI_MAY_SPAWN
     else
-	gui.dospawn = TRUE;	// Not "gvim". Need to spawn gvim.exe.
+	gui.dospawn = true;	// Not "gvim". Need to spawn gvim.exe.
 # endif
 
 
@@ -2189,7 +2202,7 @@ command_line_scan(mparm_T *parmp)
 		    cmdline_width = Columns = 80;   // need to init Columns
 		    info_message = TRUE; // use mch_msg(), not mch_errmsg()
 # if defined(FEAT_GUI) && !defined(ALWAYS_USE_GUI) && !defined(VIMDLL)
-		    gui.starting = FALSE; // not starting GUI, will exit
+		    gui.starting = false; // not starting GUI, will exit
 # endif
 		    list_version();
 		    msg_putchar('\n');
@@ -2215,7 +2228,7 @@ command_line_scan(mparm_T *parmp)
 		else if (STRNICMP(argv[0] + argv_idx, "nofork", 6) == 0)
 		{
 # ifdef FEAT_GUI
-		    gui.dofork = FALSE;	// don't fork() when starting GUI
+		    gui.dofork = false;	// don't fork() when starting GUI
 # endif
 		}
 		else if (STRNICMP(argv[0] + argv_idx, "noplugin", 8) == 0)
@@ -2250,9 +2263,9 @@ command_line_scan(mparm_T *parmp)
 		    ; // already processed -- no arg
 		else if (STRNICMP(argv[0] + argv_idx, "servername", 10) == 0
 		       || STRNICMP(argv[0] + argv_idx, "serversend", 10) == 0
-#  if defined(FEAT_X11) && defined(FEAT_SOCKETSERVER)
+		       // Don't put this under FEAT_CLIENTSERVER_BACKENDS, just
+		       // let it be ignored. Makes tests less complicated
 		       || STRNICMP(argv[0] + argv_idx, "clientserver", 12) == 0
-#  endif
 		       )
 		{
 		    // already processed -- snatch the following arg
@@ -2327,7 +2340,7 @@ command_line_scan(mparm_T *parmp)
 	    case 'f':		// "-f"  GUI: run in foreground.  Amiga: open
 				// window directly, not with newcli
 # ifdef FEAT_GUI
-		gui.dofork = FALSE;	// don't fork() when starting GUI
+		gui.dofork = false;	// don't fork() when starting GUI
 # endif
 		break;
 
@@ -2344,7 +2357,7 @@ command_line_scan(mparm_T *parmp)
 	    case 'h':		// "-h" give help message
 # ifdef FEAT_GUI_GNOME
 		// Tell usage() to exit for "gvim".
-		gui.starting = FALSE;
+		gui.starting = false;
 # endif
 		usage();
 		break;
@@ -2374,7 +2387,7 @@ command_line_scan(mparm_T *parmp)
 
 	    case 'y':		// "-y"  easy mode
 # ifdef FEAT_GUI
-		gui.starting = TRUE;	// start GUI a bit later
+		gui.starting = true;	// start GUI a bit later
 # endif
 		parmp->evim_mode = TRUE;
 		break;
@@ -2504,7 +2517,7 @@ command_line_scan(mparm_T *parmp)
 	    case 'v':		// "-v"  Vi-mode (as if called "vi")
 		exmode_active = 0;
 # if defined(FEAT_GUI) && !defined(VIMDLL)
-		gui.starting = FALSE;	// don't start GUI
+		gui.starting = false;	// don't start GUI
 # endif
 		break;
 
@@ -2694,7 +2707,7 @@ scripterror:
 		     */
 # ifdef FEAT_GUI
 		    if (term_is_gui((char_u *)argv[0]))
-			gui.starting = TRUE;	// start GUI a bit later
+			gui.starting = true;	// start GUI a bit later
 		    else
 # endif
 			parmp->term = (char_u *)argv[0];
@@ -3508,7 +3521,7 @@ source_startup_scripts(mparm_T *parmp)
 main_start_gui(void)
 {
 # ifdef FEAT_GUI
-    gui.starting = TRUE;	// start GUI a bit later
+    gui.starting = true;	// start GUI a bit later
 # else
     mch_errmsg(_(e_gui_cannot_be_used_not_enabled_at_compile_time));
     mch_errmsg("\n");
@@ -3595,7 +3608,7 @@ mainerr(
     gui.in_use = mch_is_gui_executable();
 #endif
 #ifdef FEAT_GUI_MSWIN
-    gui.starting = FALSE;   // Needed to show as error.
+    gui.starting = false;   // Needed to show as error.
 #endif
 
     init_longVersion();
@@ -3750,8 +3763,8 @@ usage(void)
     main_msg(_("-Y\t\t\tDo not connect to Wayland compositor"));
 # endif
 # ifdef FEAT_CLIENTSERVER
-#  if defined(FEAT_X11) && defined(FEAT_SOCKETSERVER)
-    main_msg(_("--clientserver <socket|x11> Backend for clientserver communication"));
+#  ifdef FEAT_CLIENTSERVER_BACKENDS
+    main_msg(_("--clientserver <socket|x11|mswin> Backend for clientserver communication"));
 #  endif
     main_msg(_("--remote <files>\tEdit <files> in a Vim server if possible"));
     main_msg(_("--remote-silent <files>  Same, don't complain if there is no server"));
@@ -3822,7 +3835,7 @@ usage(void)
     if (gui.starting)
     {
 	mch_msg("\n");
-	gui.dofork = FALSE;
+	gui.dofork = false;
     }
     else
 # endif
