@@ -1832,8 +1832,9 @@ extern cursorentry_T shape_table[SHAPE_IDX_COUNT];
 # define OPT_PRINT_COLLATE	11
 # define OPT_PRINT_JOBSPLIT	12
 # define OPT_PRINT_FORMFEED	13
+# define OPT_PRINT_FORMAT	14
 
-# define OPT_PRINT_NUM_OPTIONS	14
+# define OPT_PRINT_NUM_OPTIONS	15
 
 EXTERN option_table_T printer_opts[OPT_PRINT_NUM_OPTIONS]
 # ifdef DO_INIT
@@ -1852,6 +1853,7 @@ EXTERN option_table_T printer_opts[OPT_PRINT_NUM_OPTIONS]
 	{"collate",	FALSE, 0, NULL, 0, FALSE},
 	{"jobsplit", FALSE, 0, NULL, 0, FALSE},
 	{"formfeed", FALSE, 0, NULL, 0, FALSE},
+	{"format", FALSE, 0, NULL, 0, FALSE},
     }
 # endif
     ;
@@ -1885,7 +1887,7 @@ EXTERN Display	*xterm_dpy INIT(= NULL);
 EXTERN XtAppContext app_context INIT(= (XtAppContext)NULL);
 #endif
 
-#ifdef FEAT_GUI_GTK
+#if defined(FEAT_GUI_GTK) && !defined(USE_GTK4)
 EXTERN guint32	gtk_socket_id INIT(= 0);
 EXTERN int	echo_wid_arg INIT(= FALSE);	// --echo-wid argument
 #endif
@@ -2007,6 +2009,7 @@ EXTERN int  disable_char_avail_for_testing INIT(= FALSE);
 EXTERN int  disable_redraw_for_testing INIT(= FALSE);
 EXTERN int  ignore_redraw_flag_for_testing INIT(= FALSE);
 EXTERN int  nfa_fail_for_testing INIT(= FALSE);
+EXTERN int  disable_syn_idlist_cache_for_testing INIT(= FALSE);
 EXTERN int  no_query_mouse_for_testing INIT(= FALSE);
 EXTERN int  ui_delay_for_testing INIT(= 0);
 EXTERN int  reset_term_props_on_termresponse INIT(= FALSE);

@@ -1516,8 +1516,18 @@ do_filter(
 	     */
 	    curwin->w_cursor.lnum = line1;
 	    del_lines(linecount, TRUE);
-	    curbuf->b_op_start.lnum -= linecount;	// adjust '[
-	    curbuf->b_op_end.lnum -= linecount;		// adjust ']
+	    if (read_linecount == 0)
+	    {
+		// no filter output: clamp '[ and '] to a valid line
+		curbuf->b_op_start.lnum = curbuf->b_op_end.lnum =
+					MIN(line1, curbuf->b_ml.ml_line_count);
+		curbuf->b_op_start.col = curbuf->b_op_end.col = 0;
+	    }
+	    else
+	    {
+		curbuf->b_op_start.lnum -= linecount;	// adjust '[
+		curbuf->b_op_end.lnum -= linecount;	// adjust ']
+	    }
 	    write_lnum_adjust(-linecount);		// adjust last line
 							// for next write
 #ifdef FEAT_FOLDING
@@ -4407,6 +4417,7 @@ ex_substitute(exarg_T *eap)
 	    int		do_again;	// do it again after joining lines
 	    int		skip_match = FALSE;
 	    linenr_T	sub_firstlnum;	// nr of first sub line
+	    bool	did_split = false;	// "\r" split the line
 #ifdef FEAT_PROP_POPUP
 	    int		apc_flags = APC_SAVE_FOR_UNDO | APC_SUBSTITUTE;
 	    colnr_T	total_added =  0;
@@ -4865,7 +4876,7 @@ ex_substitute(exarg_T *eap)
 #ifdef FEAT_PROP_POPUP
 		    if (curbuf->b_has_textprop)
 		    {
-			int bytes_added = sublen - 1 - (regmatch.endpos[0].col
+			int bytes_added = (int)sublen - 1 - (regmatch.endpos[0].col
 						   - regmatch.startpos[0].col);
 
 			// When text properties are changed, need to save for
@@ -4931,7 +4942,7 @@ ex_substitute(exarg_T *eap)
 					continue;
 				    text_props[wi] = text_props[pi];
 				    text_props[wi].tp_col +=
-					regmatch.startpos[0].col + sublen - 1;
+					regmatch.startpos[0].col + (colnr_T)sublen - 1;
 				    text_props[wi].u.tp_text = NULL;
 				    ++wi;
 				}
@@ -5114,6 +5125,7 @@ ex_substitute(exarg_T *eap)
 			    ++sub_firstlnum;
 			    ++lnum;
 			    ++line2;
+			    did_split = true;
 			    // move the cursor to the new line, like Vi
 			    ++curwin->w_cursor.lnum;
 			    // copy the rest
@@ -5156,9 +5168,12 @@ skip:
 		 * match, otherwise "\@<=" won't work.
 		 * When the match starts below where we start searching also
 		 * need to replace the line first (using \zs after \n).
+		 * When asking, undo is synced at every match, so a line split
+		 * by "\r" must be replaced in the same undo block.
 		 */
 		if (lastone
 			|| nmatch_tl > 0
+			|| (subflags.do_ask && did_split)
 			|| (nmatch = vim_regexec_multi(&regmatch, curwin,
 							curbuf, sub_firstlnum,
 						    matchcol, NULL)) == 0
@@ -5237,6 +5252,7 @@ skip:
 			prev_matchcol = (colnr_T)(sub_firstline.length
 							      - prev_matchcol);
 			copycol = 0;
+			did_split = false;
 		    }
 		    if (nmatch == -1 && !lastone)
 			nmatch = vim_regexec_multi(&regmatch, curwin, curbuf,

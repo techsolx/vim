@@ -1257,14 +1257,7 @@ get_function_body(
 			--end;
 		    is_block = end > p + 2 && end[-1] == '=' && end[0] == '>';
 		    if (!is_block)
-		    {
-			char_u *s = p;
-
-			// check for line starting with "au" for :autocmd or
-			// "com" for :command, these can use a {} block
-			is_block = checkforcmd_noparen(&s, "autocmd", 2)
-				      || checkforcmd_noparen(&s, "command", 3);
-		    }
+			is_block = find_cmd_block_start(p) != NULL;
 
 		    if (is_block)
 		    {
@@ -3997,7 +3990,7 @@ call_func(
 	// could be changed or deleted in the called function.
 	name = len > 0 ? vim_strnsave(funcname, len) : vim_strsave(funcname);
 	if (name == NULL)
-	    return ret;
+	    goto theend;
 
 	fname = fname_trans_sid(name, fname_buf, &tofree, &error);
     }
@@ -6684,14 +6677,20 @@ add_defer(char_u *name, int argcount_arg, typval_T *argvars)
     if (in_def_function())
     {
 	if (add_defer_function(saved_name, argcount, argvars) == OK)
+	{
 	    argcount = 0;
+	    ret = OK;
+	}
     }
     else
     {
 	if (current_funccal->fc_defer.ga_itemsize == 0)
 	    ga_init2(&current_funccal->fc_defer, sizeof(defer_T), 10);
-	if (ga_grow(&current_funccal->fc_defer, 1) == FAIL)
+	if (ga_grow_id(&current_funccal->fc_defer, 1, aid_defer) == FAIL)
+	{
+	    vim_free(saved_name);
 	    goto theend;
+	}
 	dr = ((defer_T *)current_funccal->fc_defer.ga_data)
 					  + current_funccal->fc_defer.ga_len++;
 	dr->dr_name = saved_name;
@@ -6701,8 +6700,8 @@ add_defer(char_u *name, int argcount_arg, typval_T *argvars)
 	    --argcount;
 	    dr->dr_argvars[argcount] = argvars[argcount];
 	}
+	ret = OK;
     }
-    ret = OK;
 
 theend:
     while (--argcount >= 0)
@@ -7334,15 +7333,34 @@ get_funccal(void)
 }
 
 /*
+ * Get the function call environment to use for the l: and a: variables, based
+ * on the backtrace debug level.
+ * Returns NULL if there is no current funccal or when the selected funccal is
+ * for a :def function, which does not have l: and a: dictionaries.
+ */
+    static funccall_T *
+get_funccal_for_vars(void)
+{
+    funccall_T	*funccal = NULL;
+
+    if (current_funccal == NULL)
+	return NULL;
+    funccal = get_funccal();
+    if (funccal == NULL || funccal->fc_l_vars.dv_refcount == 0)
+	return NULL;
+    return funccal;
+}
+
+/*
  * Return the hashtable used for local variables in the current funccal.
  * Return NULL if there is no current funccal.
  */
     hashtab_T *
 get_funccal_local_ht(void)
 {
-    if (current_funccal == NULL || current_funccal->fc_l_vars.dv_refcount == 0)
-	return NULL;
-    return &get_funccal()->fc_l_vars.dv_hashtab;
+    funccall_T	*funccal = get_funccal_for_vars();
+
+    return funccal == NULL ? NULL : &funccal->fc_l_vars.dv_hashtab;
 }
 
 /*
@@ -7352,9 +7370,9 @@ get_funccal_local_ht(void)
     dictitem_T *
 get_funccal_local_var(void)
 {
-    if (current_funccal == NULL || current_funccal->fc_l_vars.dv_refcount == 0)
-	return NULL;
-    return &get_funccal()->fc_l_vars_var;
+    funccall_T	*funccal = get_funccal_for_vars();
+
+    return funccal == NULL ? NULL : &funccal->fc_l_vars_var;
 }
 
 /*
@@ -7364,9 +7382,9 @@ get_funccal_local_var(void)
     hashtab_T *
 get_funccal_args_ht(void)
 {
-    if (current_funccal == NULL || current_funccal->fc_l_vars.dv_refcount == 0)
-	return NULL;
-    return &get_funccal()->fc_l_avars.dv_hashtab;
+    funccall_T	*funccal = get_funccal_for_vars();
+
+    return funccal == NULL ? NULL : &funccal->fc_l_avars.dv_hashtab;
 }
 
 /*
@@ -7376,9 +7394,9 @@ get_funccal_args_ht(void)
     dictitem_T *
 get_funccal_args_var(void)
 {
-    if (current_funccal == NULL || current_funccal->fc_l_vars.dv_refcount == 0)
-	return NULL;
-    return &get_funccal()->fc_l_avars_var;
+    funccall_T	*funccal = get_funccal_for_vars();
+
+    return funccal == NULL ? NULL : &funccal->fc_l_avars_var;
 }
 
 /*

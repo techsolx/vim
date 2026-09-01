@@ -248,6 +248,7 @@ static int nfa_re_flags; // re_flags passed to nfa_regcomp()
 static int *post_start;  // holds the postfix form of r.e.
 static int *post_end;
 static int *post_ptr;
+static int nfa_reg_parse_depth;	// nesting depth in nfa_reg()
 
 // Set when the pattern should use the NFA engine.
 // E.g. [[:upper:]] only allows 8bit characters for BT engine,
@@ -310,6 +311,7 @@ nfa_regcomp_start(
     wants_nfa = FALSE;
     rex.nfa_has_zend = FALSE;
     rex.nfa_has_backref = FALSE;
+    nfa_reg_parse_depth = 0;
 
     // shared with BT engine
     regcomp_start(expr, re_flags);
@@ -1105,7 +1107,7 @@ nfa_emit_equi_class(int c)
 		    EMIT2(0x12f) EMIT2(0x1d0) EMIT2(0x209)
 		    EMIT2(0x20b) EMIT2(0x268) EMIT2(0x1d96)
 		    EMIT2(0x1e2d) EMIT2(0x1e2f) EMIT2(0x1ec9)
-		    EMIT2(0x1ecb) EMIT2(0x1ecb)
+		    EMIT2(0x1ecb)
 		    return OK;
 
 	    case 'j': case 0x135: case 0x1f0: case 0x249:
@@ -2516,6 +2518,7 @@ nfa_reg(
     int		paren)	// REG_NOPAREN, REG_PAREN, REG_NPAREN or REG_ZPAREN
 {
     int		parno = 0;
+    int		status = FAIL;
 
     if (paren == REG_PAREN)
     {
@@ -2533,14 +2536,18 @@ nfa_reg(
     }
 #endif
 
+    if (nfa_reg_parse_depth >= REG_MAX_PAREN_DEPTH)
+	EMSG_RET_FAIL(_(e_command_too_complex));
+    ++nfa_reg_parse_depth;
+
     if (nfa_regbranch() == FAIL)
-	return FAIL;	    // cascaded error
+	goto theend;	    // cascaded error
 
     while (peekchr() == Magic('|'))
     {
 	skipchr();
 	if (nfa_regbranch() == FAIL)
-	    return FAIL;    // cascaded error
+	    goto theend;    // cascaded error
 	EMIT(NFA_OR);
     }
 
@@ -2548,17 +2555,23 @@ nfa_reg(
     if (paren != REG_NOPAREN && getchr() != Magic(')'))
     {
 	if (paren == REG_NPAREN)
-	    EMSG2_RET_FAIL(_(e_unmatched_str_percent_open),
-						       reg_magic == MAGIC_ALL);
+	    semsg(_(e_unmatched_str_percent_open),
+				       reg_magic == MAGIC_ALL ? "" : "\\");
 	else
-	    EMSG2_RET_FAIL(_(e_unmatched_str_open), reg_magic == MAGIC_ALL);
+	    semsg(_(e_unmatched_str_open),
+				       reg_magic == MAGIC_ALL ? "" : "\\");
+	rc_did_emsg = TRUE;
+	goto theend;
     }
     else if (paren == REG_NOPAREN && peekchr() != NUL)
     {
 	if (peekchr() == Magic(')'))
-	    EMSG2_RET_FAIL(_(e_unmatched_str_close), reg_magic == MAGIC_ALL);
+	    semsg(_(e_unmatched_str_close),
+				       reg_magic == MAGIC_ALL ? "" : "\\");
 	else
-	    EMSG_RET_FAIL(_(e_nfa_regexp_proper_termination_error));
+	    emsg(_(e_nfa_regexp_proper_termination_error));
+	rc_did_emsg = TRUE;
+	goto theend;
     }
     /*
      * Here we set the flag allowing back references to this set of
@@ -2574,7 +2587,11 @@ nfa_reg(
 	EMIT(NFA_ZOPEN + parno);
 #endif
 
-    return OK;
+    status = OK;
+
+theend:
+    --nfa_reg_parse_depth;
+    return status;
 }
 
 #ifdef DEBUG
@@ -4536,7 +4553,8 @@ addstate(
     nfa_state_T		*state,	    // state to update
     regsubs_T		*subs_arg,  // pointers to subexpressions
     nfa_pim_T		*pim,	    // postponed look-behind match
-    int			off_arg)    // byte offset, when -1 go to next line
+    int			off_arg,    // byte offset, when -1 go to next line
+    int			depth)	    // recursion depth
 {
     int			subidx;
     int			off = off_arg;
@@ -4555,7 +4573,6 @@ addstate(
 #ifdef ENABLE_LOG
     int			did_print = FALSE;
 #endif
-    static int		depth = 0;
 
 #ifdef FEAT_RELTIME
     if (nfa_did_time_out())
@@ -4564,11 +4581,8 @@ addstate(
 
     // This function is called recursively.  When the depth is too much we run
     // out of stack and crash, limit recursiveness here.
-    if (++depth >= 5000 || subs == NULL)
-    {
-	--depth;
+    if (depth >= 5000 || subs == NULL)
 	return NULL;
-    }
 
     if (off_arg <= -ADDSTATE_HERE_OFFSET)
     {
@@ -4680,7 +4694,6 @@ skip_add:
 			    abs(state->id), l->id, state->c, code,
 			    pim == NULL ? "NULL" : "yes", l->has_pim, found);
 #endif
-			--depth;
 			return subs;
 		    }
 		}
@@ -4702,7 +4715,6 @@ skip_add:
 		if ((long)(newsize >> 10) >= p_mmp)
 		{
 		    emsg(_(e_pattern_uses_more_memory_than_maxmempattern));
-		    --depth;
 		    return NULL;
 		}
 		if (subs != &temp_subs)
@@ -4721,7 +4733,6 @@ skip_add:
 		if (newt == NULL)
 		{
 		    // out of memory
-		    --depth;
 		    return NULL;
 		}
 		l->t = newt;
@@ -4761,14 +4772,14 @@ skip_add:
 
 	case NFA_SPLIT:
 	    // order matters here
-	    subs = addstate(l, state->out, subs, pim, off_arg);
-	    subs = addstate(l, state->out1, subs, pim, off_arg);
+	    subs = addstate(l, state->out, subs, pim, off_arg, depth + 1);
+	    subs = addstate(l, state->out1, subs, pim, off_arg, depth + 1);
 	    break;
 
 	case NFA_EMPTY:
 	case NFA_NOPEN:
 	case NFA_NCLOSE:
-	    subs = addstate(l, state->out, subs, pim, off_arg);
+	    subs = addstate(l, state->out, subs, pim, off_arg, depth + 1);
 	    break;
 
 	case NFA_MOPEN:
@@ -4868,7 +4879,7 @@ skip_add:
 		sub->list.line[subidx].start = rex.input + off;
 	    }
 
-	    subs = addstate(l, state->out, subs, pim, off_arg);
+	    subs = addstate(l, state->out, subs, pim, off_arg, depth + 1);
 	    if (subs == NULL)
 		break;
 	    // "subs" may have changed, need to set "sub" again
@@ -4896,7 +4907,7 @@ skip_add:
 			: subs->norm.list.line[0].end != NULL))
 	    {
 		// Do not overwrite the position set by \ze.
-		subs = addstate(l, state->out, subs, pim, off_arg);
+		subs = addstate(l, state->out, subs, pim, off_arg, depth + 1);
 		break;
 	    }
 	    // FALLTHROUGH
@@ -4970,7 +4981,7 @@ skip_add:
 		CLEAR_FIELD(save_multipos);
 	    }
 
-	    subs = addstate(l, state->out, subs, pim, off_arg);
+	    subs = addstate(l, state->out, subs, pim, off_arg, depth + 1);
 	    if (subs == NULL)
 		break;
 	    // "subs" may have changed, need to set "sub" again
@@ -4988,7 +4999,6 @@ skip_add:
 	    sub->in_use = save_in_use;
 	    break;
     }
-    --depth;
     return subs;
 }
 
@@ -5014,7 +5024,7 @@ addstate_here(
     // First add the state(s) at the end, so that we know how many there are.
     // Pass the listidx as offset (avoids adding another argument to
     // addstate()).
-    r = addstate(l, state, subs, pim, -listidx - ADDSTATE_HERE_OFFSET);
+    r = addstate(l, state, subs, pim, -listidx - ADDSTATE_HERE_OFFSET, 0);
     if (r == NULL)
 	return NULL;
 
@@ -5854,10 +5864,10 @@ nfa_regmatch(
 	else
 	    m->norm.list.line[0].start = rex.input;
 	m->norm.in_use = 1;
-	r = addstate(thislist, start->out, m, NULL, 0);
+	r = addstate(thislist, start->out, m, NULL, 0, 0);
     }
     else
-	r = addstate(thislist, start, m, NULL, 0);
+	r = addstate(thislist, start, m, NULL, 0, 0);
     if (r == NULL)
     {
 	nfa_match = NFA_TOO_EXPENSIVE;
@@ -5943,8 +5953,14 @@ nfa_regmatch(
 	for (listidx = 0; listidx < thislist->n; ++listidx)
 	{
 	    // If the list gets very long there probably is something wrong.
-	    // At least allow interrupting with CTRL-C.
-	    fast_breakcheck();
+	    // At least allow interrupting with CTRL-C.  Only check once in a
+	    // while, calling ui_breakcheck() for every state is too slow.
+	    static int	breakcheck_count = 0;  // using "static" makes it faster
+	    if (unlikely(++breakcheck_count >= 100000))
+	    {
+		ui_breakcheck();
+		breakcheck_count = 0;
+	    }
 	    if (got_int)
 		break;
 #ifdef FEAT_RELTIME
@@ -7155,7 +7171,7 @@ nfa_regmatch(
 								pim, &listidx);
 		else
 		{
-		    r = addstate(nextlist, add_state, &t->subs, pim, add_off);
+		    r = addstate(nextlist, add_state, &t->subs, pim, add_off, 0);
 		    if (add_count > 0)
 			nextlist->t[nextlist->n - 1].count = add_count;
 		}
@@ -7243,7 +7259,7 @@ nfa_regmatch(
 		    }
 		    else
 			m->norm.list.line[0].start = rex.input + clen;
-		    if (addstate(nextlist, start->out, m, NULL, clen) == NULL)
+		    if (addstate(nextlist, start->out, m, NULL, clen, 0) == NULL)
 		    {
 			nfa_match = NFA_TOO_EXPENSIVE;
 			goto theend;
@@ -7252,7 +7268,32 @@ nfa_regmatch(
 	    }
 	    else
 	    {
-		if (addstate(nextlist, start, m, NULL, clen) == NULL)
+		char_u	    *save_line = rex.line;
+		char_u	    *save_input = rex.input;
+		linenr_T    save_lnum = rex.lnum;
+
+		// At the end of a line the match can only start on the next
+		// line, use that position instead of the line break.
+		if (REG_MULTI && clen == 0 && nfa_endp != NULL
+					 && rex.lnum < nfa_endp->se_u.pos.lnum)
+		{
+		    char_u  *next_line = reg_getline(rex.lnum + 1);
+
+		    if (next_line != NULL)
+		    {
+			rex.line = next_line;
+			rex.input = rex.line;
+			++rex.lnum;
+		    }
+		}
+
+		r = addstate(nextlist, start, m, NULL, clen, 0);
+
+		rex.line = save_line;
+		rex.input = save_input;
+		rex.lnum = save_lnum;
+
+		if (r == NULL)
 		{
 		    nfa_match = NFA_TOO_EXPENSIVE;
 		    goto theend;
