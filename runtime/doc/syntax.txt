@@ -1,4 +1,4 @@
-*syntax.txt*	For Vim version 9.2.  Last change: 2026 Aug 24
+*syntax.txt*	For Vim version 9.2.  Last change: 2026 Oct 30
 
 
 		  VIM REFERENCE MANUAL	  by Bram Moolenaar
@@ -1043,6 +1043,21 @@ example, FreeBASIC files, use this in your startup vimrc: >
    :let filetype_bas = "freebasic"
 
 
+BATS			*bats.vim* *ft-bats-syntax*
+
+Bats (Bash Automated Testing System) files are highlighted as Bash (see
+|ft-sh-syntax|), with additional highlighting for the "@test" line and test
+name, "# bats test_tags=" and "# bats file_tags=" comments, and the commands
+provided by bats-core ("run", "skip", "load", ...).
+
+The body of a "@test" block is treated as a function body.  To enable syntax
+folding of test blocks, turn on function folding: >
+	let g:sh_fold_enabled= 1
+<
+See |ft-sh-syntax| for the other folding levels offered by
+g:sh_fold_enabled.
+
+
 C							*c.vim* *ft-c-syntax*
 
 A few things in C highlighting are optional.  To enable them assign any value
@@ -1084,6 +1099,7 @@ Variable		Highlight ~
 *c_no_c99*		don't highlight C99 standard items
 *c_no_c11*		don't highlight C11 standard items
 *c_no_c23*		don't highlight C23 standard items
+*c_no_c29*		don't highlight C29 standard items
 *c_no_bsd*		don't highlight BSD specific types
 *c_functions*		highlight function calls and definitions
 *c_function_pointers*	highlight function pointers definitions
@@ -2012,9 +2028,11 @@ You can also disable this rendering by adding the following line to your
 vimrc file: >
 	:let html_no_rendering=1
 
-By default Vim synchronises the syntax to 250 lines before the first displayed
-line.  This can be configured using: >
+By default Vim starts parsing 1.5 times "html_minlines" lines before the first
+displayed line, and searches a further "html_maxlines" lines back for a
+synchronization point.  These values can be configured using: >
 	:let html_minlines = 500
+	:let html_maxlines = 750
 <
 HTML comments are rather special (see an HTML reference document for the
 details), and the syntax coloring scheme will highlight all errors.
@@ -2080,6 +2098,21 @@ how to recognize this filetype.
 To have *.inc files be recognized as IA64, add this to your .vimrc file: >
 	:let g:filetype_inc = "ia64"
 
+
+
+ICALENDAR				*icalendar.vim* *ft-icalendar-syntax*
+
+Highlighting for iCalendar files (RFC 5545), as used by calendaring
+applications with an ".ics" extension.
+
+Component boundaries (BEGIN: and END:), property names, property
+parameters and recurrence rule parts are highlighted separately.  A content
+line may be split across several lines by inserting a line break followed
+by a space or a tab; such folded lines are highlighted as a single logical
+line.
+
+Folding of components is provided by the filetype plugin and is off by
+default; see |ft-icalendar-plugin|.
 
 INFORM						*inform.vim* *ft-inform-syntax*
 
@@ -2302,11 +2335,11 @@ cycles for such a feature to become either integrated into the platform or
 withdrawn from this effort.  To cater for early adopters, there is optional
 support in Vim for syntax related preview features that are implemented.  You
 can request it by specifying a list of preview feature numbers as follows: >
-	:let g:java_syntax_previews = [530]
+	:let g:java_syntax_previews = [532]
 
 The supported JEP numbers are to be drawn from this table:
 	`430`: String Templates [JDK 21]
-	`530`: Primitive types in Patterns, instanceof, and switch
+	`532`: Primitive types in Patterns, instanceof, and switch
 
 Note that as soon as the particular preview feature will have been integrated
 into the Java platform, its entry will be removed from the table and related
@@ -6613,9 +6646,17 @@ it took to match them against the text.
 					this is not unique.
 			PATTERN		The pattern being used.
 
+							*:syn-performance*
 Pattern matching gets slow when it has to try many alternatives.  Try to
 include as much literal text as possible to reduce the number of ways a
-pattern does NOT match.
+pattern does NOT match.  For example, having "ABC" and "ADC" is faster than a
+"A[BD]C" regex.  If using literal text isn't possible, reducing the amount of
+regex by merging them where in makes sense, like grouping common patterns
+together also helps.
+
+When dealing with heavy backtracking, it's possible to force the old
+backtracking regex engine by using "\%#=1", which is often faster in those
+cases.
 
 When using the "\@<=" and "\@<!" items, add a maximum size to avoid trying at
 all positions in the current and previous line.  For example, if the item is

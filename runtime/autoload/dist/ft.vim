@@ -3,7 +3,7 @@ vim9script
 # Vim functions for file type detection
 #
 # Maintainer:		The Vim Project <https://github.com/vim/vim>
-# Last Change:		2026 Aug 26
+# Last Change:		2026 Oct 30
 # Former Maintainer:	Bram Moolenaar <Bram@vim.org>
 
 # These functions are moved here from runtime/filetype.vim to make startup
@@ -1855,6 +1855,8 @@ const ft_from_ext = {
   "bazelrc": "bazelrc",
   # Batch file for MSDOS. See dist#ft#FTsys for *.sys
   "bat": "dosbatch",
+  # Bats (Bash Automated Testing System)
+  "bats": "bats",
   # BC calculator
   "bc": "bc",
   # BDF font
@@ -1979,6 +1981,8 @@ const ft_from_ext = {
   "cob": "cobol",
   # Coco/R
   "atg": "coco",
+  # Citation files
+  "cff": "yaml",
   # Cold Fusion
   "cfm": "cf",
   "cfi": "cf",
@@ -2272,6 +2276,8 @@ const ft_from_ext = {
   # Httest
   "htt": "httest",
   "htb": "httest",
+  # ICalendar
+  "ics": "icalendar",
   # Icon
   "icn": "icon",
   # Microsoft IDL (Interface Description Language)  Also *.idl
@@ -2295,6 +2301,9 @@ const ft_from_ext = {
   "INI": "dosini",
   # Inko
   "inko": "inko",
+  # ISPC (Implicit SPMD Program Compiler)
+  "ispc": "ispc",
+  "isph": "ispc",
   # Inno Setup
   "iss": "iss",
   # J
@@ -2535,6 +2544,8 @@ const ft_from_ext = {
   "ninja": "ninja",
   # Nix
   "nix": "nix",
+  # NLP++
+  "nlp": "nlp",
   # Norg
   "norg": "norg",
   # Novell netware batch files

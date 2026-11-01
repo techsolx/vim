@@ -871,6 +871,14 @@ check_range_index_two(
 	long	    *n2,
 	int	    quiet)
 {
+    if (*n1 < 0)
+    {
+	if (l->lv_u.mat.lv_idx_item == li1)
+	    *n1 = l->lv_u.mat.lv_idx;
+	else
+	    *n1 = list_idx_of_item(l, li1);
+    }
+
     if (*n2 < 0)
     {
 	listitem_T	*ni = list_find(l, *n2);
@@ -881,12 +889,11 @@ check_range_index_two(
 		semsg(_(e_list_index_out_of_range_nr), *n2);
 	    return FAIL;
 	}
-	*n2 = list_idx_of_item(l, ni);
+	// list_find() caches the normalized index.
+	*n2 = l->lv_u.mat.lv_idx;
     }
 
     // Check that n2 isn't before n1.
-    if (*n1 < 0)
-	*n1 = list_idx_of_item(l, li1);
     if (*n2 < *n1)
     {
 	if (!quiet)
@@ -1147,7 +1154,7 @@ list2items(typval_T *argvars, typval_T *rettv)
 	    break;
 	if (list_append_list(rettv->vval.v_list, l2) == FAIL)
 	{
-	    vim_free(l2);
+	    list_free(l2);
 	    break;
 	}
 	if (list_append_number(l2, idx) == FAIL
@@ -1183,7 +1190,7 @@ string2items(typval_T *argvars, typval_T *rettv)
 	    break;
 	if (list_append_list(rettv->vval.v_list, l2) == FAIL)
 	{
-	    vim_free(l2);
+	    list_free(l2);
 	    break;
 	}
 	if (list_append_number(l2, idx) == FAIL
@@ -1297,17 +1304,35 @@ list_concat(list_T *l1, list_T *l2, typval_T *tv)
 list_slice(list_T *ol, long n1, long n2)
 {
     listitem_T	*item;
-    list_T	*l = list_alloc();
+    list_T	*l;
+    long	count;
+    long	idx;
 
+    if (n2 < n1)
+	return list_alloc();
+    if (n1 > INT_MAX - (n2 - n1) - 1)
+	return NULL;
+    count = n2 - n1 + 1;
+
+    // The length is known, so allocate the list and all items at once.
+    l = list_alloc_with_items((int)count);
     if (l == NULL)
 	return NULL;
-    for (item = list_find(ol, n1); n1 <= n2; ++n1)
+
+    item = list_find(ol, n1);
+    for (idx = 0; idx < count; ++idx)
     {
-	if (list_append_tv(l, &item->li_tv) == FAIL)
+	typval_T	new_tv;
+
+	// "item" is NULL when materializing "ol" stopped early.
+	if (item == NULL)
 	{
 	    list_free(l);
 	    return NULL;
 	}
+
+	copy_tv(&item->li_tv, &new_tv);
+	list_set_item(l, (int)idx, &new_tv);
 	item = item->li_next;
     }
     return l;
@@ -1401,12 +1426,14 @@ list_copy(list_T *orig, int deep, int top, int copyID)
 {
     list_T	*copy;
     listitem_T	*item;
-    listitem_T	*ni;
+    int		idx = 0;
 
     if (orig == NULL)
 	return NULL;
 
-    copy = list_alloc();
+    // The length is known, so allocate the list and all items at once.
+    CHECK_LIST_MATERIALIZE(orig);
+    copy = list_alloc_with_items(orig->lv_len);
     if (copy == NULL)
 	return NULL;
 
@@ -1421,25 +1448,19 @@ list_copy(list_T *orig, int deep, int top, int copyID)
 	orig->lv_copyID = copyID;
 	orig->lv_copylist = copy;
     }
-    CHECK_LIST_MATERIALIZE(orig);
     for (item = orig->lv_first; item != NULL && !got_int;
 	    item = item->li_next)
     {
-	ni = listitem_alloc();
-	if (ni == NULL)
-	    break;
+	typval_T	new_tv;
+
 	if (deep)
 	{
-	    if (item_copy(&item->li_tv, &ni->li_tv,
-			deep, FALSE, copyID) == FAIL)
-	    {
-		vim_free(ni);
+	    if (item_copy(&item->li_tv, &new_tv, deep, FALSE, copyID) == FAIL)
 		break;
-	    }
 	}
 	else
-	    copy_tv(&item->li_tv, &ni->li_tv);
-	list_append(copy, ni);
+	    copy_tv(&item->li_tv, &new_tv);
+	list_set_item(copy, idx++, &new_tv);
     }
     ++copy->lv_refcount;
     if (item != NULL)

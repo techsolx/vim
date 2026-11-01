@@ -1,7 +1,7 @@
 " Creator:    Charles E Campbell
 " Previous Maintainer: Luca Saccarola <github.e41mv@aleeas.com>
 " Maintainer: This runtime file is looking for a new maintainer.
-" Last Change: 2026 Aug 21
+" Last Change: 2026 Oct 14
 " Copyright:  Copyright (C) 2016 Charles E. Campbell {{{1
 "             Permission is hereby granted to use and distribute this code,
 "             with or without modifications, provided that this copyright
@@ -964,16 +964,19 @@ function netrw#Obtain(islocal,fname,...)
     let tgtdir= getcwd()
   endif
 
-  if exists("b:netrw_islocal") && b:netrw_islocal
+  if a:islocal
     " obtain a file from local b:netrw_curdir to (local) tgtdir
     if exists("b:netrw_curdir") && getcwd() != b:netrw_curdir
       let topath = netrw#fs#ComposePath(tgtdir,"")
+      " names in the listing are relative to b:netrw_curdir, not to vim's current directory
+      let fnamelist = map(copy(fnamelist), {_, fname -> isabsolutepath(fname) ? fname : netrw#fs#ComposePath(b:netrw_curdir, fname)})
       if has("win32") && !g:netrw_cygwin
-        " transfer files one at time
+        " transfer files one at time; "copy" in cmd.exe does not handle the
+        " composed paths reliably, use filecopy() as s:NetrwMarkFileCopy() does
         for fname in fnamelist
-          call system(g:netrw_localcopycmd.g:netrw_localcopycmdopt." ".netrw#os#Escape(fname)." ".netrw#os#Escape(topath))
-          if v:shell_error != 0
-            call netrw#msg#Notify('WARNING', printf('consider setting g:netrw_localcopycmd<%s> to something that works', g:netrw_localcopycmd))
+          let tgt = netrw#fs#ComposePath(tgtdir, fnamemodify(fname, ':t'))
+          if !filecopy(fname, tgt)
+            call netrw#msg#Notify('ERROR', printf('copy failed, unable to filecopy() <%s> to <%s>', fname, tgt))
             return
           endif
         endfor
@@ -999,7 +1002,7 @@ function netrw#Obtain(islocal,fname,...)
     endif
     call s:NetrwMethod(b:netrw_curdir)
     if !s:NetrwValidateHostname(g:netrw_machine)
-        call netrw#msg#Notify('ERROR', 'Rejecting invalid hostname: <%s>', g:netrw_machine)
+        call netrw#msg#Notify('ERROR', printf('Rejecting invalid hostname: <%s>', g:netrw_machine))
         return
     endif
 
@@ -9300,12 +9303,9 @@ function s:NetrwLcd(newdir)
 
     if err472
         call netrw#msg#Notify('ERROR', printf('unable to change directory to <%s> (permissions?)', a:newdir))
-        if exists("w:netrw_prvdir")
-            let a:newdir= w:netrw_prvdir
-        else
+        if !exists("w:netrw_prvdir")
             call s:NetrwOptionsRestore("w:")
             exe "setl ".g:netrw_bufsettings
-            let a:newdir= dirname
         endif
         return -1
     endif

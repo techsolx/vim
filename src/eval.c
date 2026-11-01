@@ -2417,6 +2417,20 @@ set_var_lval(
 		    return;
 		}
 
+		// In Vim9 script a String v: variable only takes a String.
+		if (in_vim9script() && STRNCMP(lp->ll_name, "v:", 2) == 0
+			&& tv.v_type == VAR_STRING)
+		{
+		    where_T	where = WHERE_INIT;
+
+		    if (check_typval_type(&t_string, rettv, where) == FAIL)
+		    {
+			clear_tv(&tv);
+			*endp = cc;
+			return;
+		    }
+		}
+
 		if ((di == NULL
 			 || (!var_check_ro(di->di_flags, lp->ll_name, FALSE)
 			   && !tv_check_lock(&di->di_tv, lp->ll_name, FALSE)))
@@ -3344,7 +3358,7 @@ eval_regfree(char_u *pat, regprog_T *prog)
     eval_prog_re = eval_compile_re;
 }
 
-#if defined(EXITFREE) || defined(PROTO)
+#if defined(EXITFREE)
     void
 free_eval_regcomp_cache(void)
 {
@@ -4393,12 +4407,24 @@ eval_addtuple(typval_T *tv1, typval_T *tv2)
     int		vim9script = in_vim9script();
     typval_T	var3;
 
+    // A tuple without a type, e.g. a tuple literal, is never variadic, thus
+    // only check when the first tuple has a type.
     if (vim9script && tv1->vval.v_tuple != NULL && tv2->vval.v_tuple != NULL
-	    && tv1->vval.v_tuple->tv_type != NULL
-	    && tv2->vval.v_tuple->tv_type != NULL)
+	    && tv1->vval.v_tuple->tv_type != NULL)
     {
-	if (!check_tuples_addable(tv1->vval.v_tuple->tv_type,
-						tv2->vval.v_tuple->tv_type))
+	type_T	    *type2 = tv2->vval.v_tuple->tv_type;
+	garray_T    type_list;
+	int	    addable;
+
+	// When the second tuple does not have a type, use the type of its
+	// value.
+	ga_init2(&type_list, sizeof(type_T *), 10);
+	if (type2 == NULL)
+	    type2 = typval2type(tv2, get_copyID(), &type_list, TVTT_DO_MEMBER);
+	addable = type2 == NULL
+		|| check_tuples_addable(tv1->vval.v_tuple->tv_type, type2);
+	clear_type_list(&type_list);
+	if (!addable)
 	    return FAIL;
     }
 
@@ -5006,11 +5032,18 @@ eval8(
     {
 	++*arg;
 	ga_init2(&type_list, sizeof(type_T *), 10);
-	want_type = parse_type(arg, &type_list, NULL, NULL, TRUE);
-	if (want_type == NULL && (evaluate || **arg != '>'))
+	if (!evaluate)
+	    // Only skip over the type, it may use a type variable that is only
+	    // known when the expression is compiled, e.g. in a lambda.
+	    *arg = skip_type(*arg, FALSE);
+	else
 	{
-	    clear_type_list(&type_list);
-	    return FAIL;
+	    want_type = parse_type(arg, &type_list, NULL, NULL, TRUE);
+	    if (want_type == NULL)
+	    {
+		clear_type_list(&type_list);
+		return FAIL;
+	    }
 	}
 
 	if (**arg != '>')
@@ -5053,6 +5086,9 @@ eval8(
 		    where_T where = WHERE_INIT;
 
 		    res = check_type(want_type, actual, TRUE, where);
+		    if (res == FAIL)
+			// the caller does not free the value on failure
+			clear_tv(rettv);
 		}
 	    }
 	}
@@ -5373,6 +5409,11 @@ eval9_var_func_name(
 	{
 	    // skip the name
 	    check_vars(s, len);
+
+	    // Skip the type arguments of a generic function, its name starts
+	    // with an uppercase letter.
+	    if (vim9script && **arg == '<' && ASCII_ISUPPER(*s))
+		skip_generic_func_type_args(arg);
 	    ret = OK;
 	}
     }
@@ -5728,6 +5769,12 @@ call_func_rettv(
     funcexe.fe_lastline = curwin->w_cursor.lnum;
     funcexe.fe_evaluate = evaluate;
     funcexe.fe_partial = pt;
+    if (pt != NULL)
+    {
+	funcexe.fe_object = pt->pt_obj;
+	if (funcexe.fe_object != NULL)
+	    ++funcexe.fe_object->obj_refcount;
+    }
     funcexe.fe_selfdict = selfdict;
     funcexe.fe_basetv = basetv;
     if (evalarg != NULL)
@@ -7873,10 +7920,12 @@ item_copy(
 		++to->vval.v_list->lv_refcount;
 	    }
 	    else
+	    {
 		to->vval.v_list = list_copy(from->vval.v_list,
 							    deep, top, copyID);
-	    if (to->vval.v_list == NULL)
-		ret = FAIL;
+		if (to->vval.v_list == NULL)
+		    ret = FAIL;
+	    }
 	    break;
 	case VAR_TUPLE:
 	    to->v_type = VAR_TUPLE;
@@ -7890,10 +7939,12 @@ item_copy(
 		++to->vval.v_tuple->tv_refcount;
 	    }
 	    else
+	    {
 		to->vval.v_tuple = tuple_copy(from->vval.v_tuple,
 							    deep, top, copyID);
-	    if (to->vval.v_tuple == NULL)
-		ret = FAIL;
+		if (to->vval.v_tuple == NULL)
+		    ret = FAIL;
+	    }
 	    break;
 	case VAR_BLOB:
 	    to->v_type = VAR_BLOB;
@@ -7919,10 +7970,12 @@ item_copy(
 		++to->vval.v_dict->dv_refcount;
 	    }
 	    else
+	    {
 		to->vval.v_dict = dict_copy(from->vval.v_dict,
 							    deep, top, copyID);
-	    if (to->vval.v_dict == NULL)
-		ret = FAIL;
+		if (to->vval.v_dict == NULL)
+		    ret = FAIL;
+	    }
 	    break;
 	case VAR_UNKNOWN:
 	case VAR_ANY:

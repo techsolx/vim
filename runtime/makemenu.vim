@@ -2,7 +2,7 @@ vim9script
 
 # Script to define the syntax menu in synmenu.vim
 # Maintainer:		The Vim Project <https://github.com/vim/vim>
-# Last Change:		2026 Aug 26
+# Last Change:		2026 Oct 12
 # Former Maintainer:	Bram Moolenaar <Bram@vim.org>
 
 # This is used by "make menu" in the src directory.
@@ -22,6 +22,7 @@ var cur_menu_item = 0
 var cur_menu_char = ""
 
 def Syn(arg: string)
+  # Arg: Menu.SubMenu:syntax
   # isolate menu name: until the first dot
   var i = match(arg, '\.')
   var menu_name = strpart(arg, 0, i)
@@ -117,6 +118,7 @@ SynMenu AB.Basic.FreeBasic:freebasic
 SynMenu AB.Basic.IBasic:ibasic
 SynMenu AB.Basic.QBasic:basic
 SynMenu AB.Basic.Visual\ Basic:vb
+SynMenu AB.Bats:bats
 SynMenu AB.Bazaar\ commit\ file:bzr
 SynMenu AB.Bazel:bzl
 SynMenu AB.Bazel\ rc\ file:bazelrc
@@ -348,6 +350,7 @@ SynMenu HIJK.Hosts\ access:hostsaccess
 SynMenu HIJK.Hyper\ Builder:hb
 SynMenu HIJK.Hyprlang:hyprlang
 SynMenu HIJK.I3Config:i3config
+SynMenu HIJK.Icalendar:icalendar
 SynMenu HIJK.Icewm\ menu:icemenu
 SynMenu HIJK.Icon:icon
 SynMenu HIJK.IDL\Generic\ IDL:idl
@@ -735,6 +738,7 @@ SynMenu Sn-Sy.Structurizr:structurizr
 SynMenu Sn-Sy.Stylus:stylus
 SynMenu Sn-Sy.Subversion\ commit:svn
 SynMenu Sn-Sy.Sudoers:sudoers
+SynMenu Sn-Sy.Svelt:svelte
 SynMenu Sn-Sy.SVG:svg
 SynMenu Sn-Sy.Swayconfig:swayconfig
 SynMenu Sn-Sy.Swift.Swift:swift

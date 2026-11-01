@@ -1722,10 +1722,17 @@ do_shell(
 		save_nwr = no_wait_return;
 		if (swapping_screen())
 		    no_wait_return = FALSE;
+		// ":silent" leaves the output of the command on the screen,
+		// except where it cannot be seen there anyway.
+		int redraw = msg_silent == 0 || swapping_screen();
+# ifdef FEAT_GUI
+		if (gui.in_use)
+		    redraw = TRUE;
+# endif
 # ifdef AMIGA
-		wait_return(term_console ? -1 : msg_silent == 0); // see below
+		wait_return(term_console ? -1 : redraw); // see below
 # else
-		wait_return(msg_silent == 0);
+		wait_return(redraw);
 # endif
 		no_wait_return = save_nwr;
 	    }
@@ -3572,6 +3579,56 @@ delbuf_msg(char_u *name)
 static int append_indent = 0;	    // autoindent for first line
 
 /*
+ * Get the next line of text for ":append", ":insert" and ":change": the text
+ * after the bar, the next line of the command, or a line from the script or
+ * the user.  Returns NULL when there is no more.
+ */
+    static char_u *
+get_append_line(exarg_T *eap, int indent)
+{
+    char_u	*theline;
+    char_u	*p;
+
+    if (*eap->arg == '|')
+    {
+	// Get the text after the trailing bar.
+	theline = vim_strsave(eap->arg + 1);
+	*eap->arg = NUL;
+    }
+    else if (eap->ea_getline == NULL)
+    {
+	// No getline() function, use the lines that follow. This ends
+	// when there is no more.
+	if (eap->nextcmd == NULL)
+	    return NULL;
+	p = vim_strchr(eap->nextcmd, NL);
+	if (p == NULL)
+	    p = eap->nextcmd + STRLEN(eap->nextcmd);
+	theline = vim_strnsave(eap->nextcmd, p - eap->nextcmd);
+	if (*p != NUL)
+	    ++p;
+	else
+	    p = NULL;
+	eap->nextcmd = p;
+    }
+    else
+    {
+	int save_State = State;
+
+	// Set State to avoid the cursor shape to be set to MODE_INSERT
+	// state when getline() returns.
+	State = MODE_CMDLINE;
+	theline = eap->ea_getline(
+#ifdef FEAT_EVAL
+		eap->cstack->cs_looplevel > 0 ? -1 :
+#endif
+		NUL, eap->cookie, indent, TRUE);
+	State = save_State;
+    }
+    return theline;
+}
+
+/*
  * ":insert" and ":append", also used by ":change"
  */
     void
@@ -3586,9 +3643,23 @@ ex_append(exarg_T *eap)
     int		empty = (curbuf->b_ml.ml_flags & ML_EMPTY);
 
 #ifdef FEAT_EVAL
-    if (not_in_vim9(eap) == FAIL)
+    if (not_in_vim9(eap, eap->skip) == FAIL)
 	return;
 #endif
+    if (eap->skip)
+    {
+	// Not executing the command, only read the lines up to the ".".
+	while ((theline = get_append_line(eap, 0)) != NULL)
+	{
+	    int end = theline[0] == '.' && theline[1] == NUL;
+
+	    vim_free(theline);
+	    if (end)
+		break;
+	}
+	return;
+    }
+
     // the ! flag toggles autoindent
     if (eap->forceit)
 	curbuf->b_p_ai = !curbuf->b_p_ai;
@@ -3623,42 +3694,7 @@ ex_append(exarg_T *eap)
 		indent = get_indent_lnum(lnum);
 	}
 	ex_keep_indent = FALSE;
-	if (*eap->arg == '|')
-	{
-	    // Get the text after the trailing bar.
-	    theline = vim_strsave(eap->arg + 1);
-	    *eap->arg = NUL;
-	}
-	else if (eap->ea_getline == NULL)
-	{
-	    // No getline() function, use the lines that follow. This ends
-	    // when there is no more.
-	    if (eap->nextcmd == NULL)
-		break;
-	    p = vim_strchr(eap->nextcmd, NL);
-	    if (p == NULL)
-		p = eap->nextcmd + STRLEN(eap->nextcmd);
-	    theline = vim_strnsave(eap->nextcmd, p - eap->nextcmd);
-	    if (*p != NUL)
-		++p;
-	    else
-		p = NULL;
-	    eap->nextcmd = p;
-	}
-	else
-	{
-	    int save_State = State;
-
-	    // Set State to avoid the cursor shape to be set to MODE_INSERT
-	    // state when getline() returns.
-	    State = MODE_CMDLINE;
-	    theline = eap->ea_getline(
-#ifdef FEAT_EVAL
-		    eap->cstack->cs_looplevel > 0 ? -1 :
-#endif
-		    NUL, eap->cookie, indent, TRUE);
-	    State = save_State;
-	}
+	theline = get_append_line(eap, indent);
 	lines_left = Rows - 1;
 	if (theline == NULL)
 	    break;
@@ -3743,9 +3779,14 @@ ex_change(exarg_T *eap)
     linenr_T	lnum;
 
 #ifdef FEAT_EVAL
-    if (not_in_vim9(eap) == FAIL)
+    if (not_in_vim9(eap, eap->skip) == FAIL)
 	return;
 #endif
+    if (eap->skip)
+    {
+	ex_append(eap);
+	return;
+    }
     if (eap->line2 >= eap->line1
 	    && u_save(eap->line1 - 1, eap->line2 + 1) == FAIL)
 	return;
@@ -5685,7 +5726,7 @@ free_old_sub(void)
 /*
  * Set up for a tagpreview.
  * Makes the preview window the current window.
- * Return TRUE when it was created.
+ * Return TRUE when a window was split for it.
  */
     int
 prepare_tagpreview(
@@ -5745,7 +5786,10 @@ prepare_tagpreview(
 # ifdef FEAT_PROP_POPUP
     if ((use_previewpopup && *p_pvp != NUL)
 	    || use_popup != USEPOPUP_NONE)
-	return popup_create_preview_window(use_popup != USEPOPUP_NONE);
+    {
+	(void)popup_create_preview_window(use_popup != USEPOPUP_NONE);
+	return FALSE;
+    }
 # endif
     if (win_split(g_do_tagpreview > 0 ? g_do_tagpreview : 0, 0) == FAIL)
 	return FALSE;

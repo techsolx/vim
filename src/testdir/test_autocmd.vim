@@ -124,6 +124,32 @@ if has('timers')
     set updatetime&
   endfunc
 
+  func Test_cursorhold_normal_ctrl_w()
+    au CursorHold * :
+    set updatetime=20
+    new
+    let bnr = bufnr()
+    call timer_start(100, { -> feedkeys("w", 't') })
+    call feedkeys("\<C-w>", 'tx!')
+    sleep 200m
+    call assert_equal(2, winnr())
+
+    " <C-w> with count
+    new
+    let bnr2 = bufnr()
+    call timer_start(100, { -> feedkeys("w", 't') })
+    call feedkeys("\<C-w>3", 'tx!')
+    sleep 200m
+    call assert_equal(3, winnr())
+    call feedkeys(":\<C-B>\"\<CR>", 'xt')
+    call assert_equal('"', @:)
+
+    exe 'bwipe!' bnr2
+    exe 'bwipe!' bnr
+    au! CursorHold
+    set updatetime&
+  endfunc
+
   func Test_OptionSet_modeline()
     call test_override('starting', 1)
     au! OptionSet
@@ -4070,6 +4096,34 @@ func Test_autocmd_with_block()
   augroup END
 endfunc
 
+" Test for a lambda in an :autocmd block with the expression split over lines
+func Test_autocmd_block_multiline_lambda()
+  let lines =<< trim END
+      vim9script
+      autocmd CmdlineEnter * {
+          g:Lambda = () => true ?
+              'yes' :
+              'no' | g:after = 'done'
+        }
+      doautocmd CmdlineEnter
+      assert_equal('yes', g:Lambda())
+      assert_equal('done', g:after)
+
+      au! CmdlineEnter
+      autocmd CmdlineEnter * {
+          g:Lambda = () => false ?
+              'yes' :
+              'no'
+        }
+      doautocmd CmdlineEnter
+      assert_equal('no', g:Lambda())
+  END
+  call v9.CheckScriptSuccess(lines)
+
+  unlet g:Lambda g:after
+  au! CmdlineEnter
+endfunc
+
 " Test for a backslash line continuation in an :autocmd command
 func Test_autocmd_line_continuation()
   let lines =<< trim END
@@ -4172,6 +4226,61 @@ func Test_autocmd_trailing_curly_no_block()
   bwipe!
   unlet g:after_autocmd
   au! CursorHold
+endfunc
+
+" Lines after ":au! grp | cmd" in a {} block are executed
+func Test_autocmd_block_bar_after_autocmd()
+  augroup XautoBarOther
+  augroup END
+  augroup XautoBar
+    autocmd CursorHold * {
+          au! XautoBarOther | g:bar_first = 'yes'
+          g:bar_second = 'yes'
+        }
+  augroup END
+  doautocmd CursorHold
+  call assert_equal('yes', g:bar_first)
+  call assert_equal('yes', g:bar_second)
+  unlet g:bar_first g:bar_second
+  au! XautoBar
+  augroup! XautoBar
+  augroup! XautoBarOther
+
+  " When the block removes its own group, a Vim9 script with an
+  " autocommand for the same event keeps its variables.
+  augroup XautoBarSelf
+    autocmd CursorHold * {
+          au! XautoBarSelf | aug! XautoBarSelf
+        }
+  augroup END
+  let lines =<< trim END
+      vim9script
+      var count = 0
+      def g:AutoBarCount(): number
+        count += 1
+        return count
+      enddef
+      autocmd CursorHold * g:AutoBarCount()
+  END
+  call writefile(lines, 'XautoBarScript', 'D')
+  source XautoBarScript
+  doautocmd CursorHold
+  call assert_equal(2, g:AutoBarCount())
+  au! CursorHold
+  delfunc g:AutoBarCount
+
+  " Expanding "%" and "#" reallocates the command line, the line after the
+  " newline must still be executed.
+  new Xbar
+  new Xfoo
+  exe "silent !echo %\nlet g:bar_after = 'yes'"
+  call assert_equal('yes', g:bar_after)
+  unlet g:bar_after
+  exe "silent !echo % #\nlet g:bar_after = 'yes'"
+  call assert_equal('yes', g:bar_after)
+  unlet g:bar_after
+  bwipe!
+  bwipe!
 endfunc
 
 func Test_closing_autocmd_window()
@@ -6499,6 +6608,20 @@ func Test_TextPutPost_term_norm()
 
   unlet err
   bwipe!
+endfunc
+
+func Test_setfname_wipe_in_autocmd()
+  edit Xsetfname_a
+  let bnr = bufnr()
+  badd Xsetfname_other
+  badd Xsetfname_b
+  augroup Xtest
+    exe 'au BufWipeout Xsetfname_b ++once bwipe! ' .. bnr
+  augroup END
+  call assert_fails('file Xsetfname_b', 'E937:')
+  au! Xtest
+  augroup! Xtest
+  %bwipe!
 endfunc
 
 " vim: shiftwidth=2 sts=2 expandtab

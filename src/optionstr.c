@@ -70,6 +70,10 @@ static char *(p_fdo_values[]) = {"all", "block", "hor", "mark", "percent",
 #endif
 // Note: Keep this in sync with match_keyprotocol()
 static char *(p_kpc_protocol_values[]) = {"none", "mok2", "kitty", NULL};
+#ifdef FEAT_IMAGE
+// Note: Keep this in sync with match_imageprotocol()
+static char *(p_ipc_protocol_values[]) = {"none", "kitty", "sixel", NULL};
+#endif
 #ifdef FEAT_PROP_POPUP
 // Note: Keep this in sync with parse_popup_option()
 static char *(p_popup_cpp_option_values[]) = {"align:", "border:",
@@ -143,7 +147,7 @@ static char *(p_fdm_values[]) = {"manual", "expr", "marker", "indent", "syntax",
 static char *(p_fcl_values[]) = {"all", NULL};
 #endif
 static char *(p_cfc_values[]) = {"keyword", "files", "whole_line", NULL};
-static char *(p_cot_values[]) = {"menu", "menuone", "longest", "preview", "popup", "popuphidden", "noinsert", "noselect", "fuzzy", "nosort", "preinsert", "nearest", NULL};
+static char *(p_cot_values[]) = {"menu", "menuone", "longest", "preview", "popup", "popuphidden", "noinsert", "noselect", "fuzzy", "nosort", "preinsert", "nearest", "pathopt", NULL};
 #ifdef BACKSLASH_IN_FILENAME
 static char *(p_csl_values[]) = {"slash", "backslash", NULL};
 #endif
@@ -3096,6 +3100,41 @@ did_set_imactivatekey(optset_T *args UNUSED)
 }
 #endif
 
+#ifdef FEAT_IMAGE
+/*
+ * The 'imageprotocol' option is changed.
+ */
+    char *
+did_set_imageprotocol(optset_T *args UNUSED)
+{
+    if (update_image_backend() == FAIL)
+	return e_invalid_argument;
+    return NULL;
+}
+
+    int
+expand_set_imageprotocol(optexpand_T *args, int *numMatches, char_u ***matches)
+{
+    expand_T *xp = args->oe_xp;
+
+    if (xp->xp_pattern > args->oe_set_arg && *(xp->xp_pattern-1) == ':')
+    {
+	// 'imageprotocol' only has well-defined terms for completion for the
+	// protocol part after the colon.
+	return expand_set_opt_string(
+		args,
+		p_ipc_protocol_values,
+		ARRAY_LENGTH(p_ipc_protocol_values) - 1,
+		numMatches,
+		matches);
+    }
+    // Use expand_set_opt_string instead of returning FAIL so that we can
+    // include the original value if args->oe_include_orig_val is set.
+    static char *(empty[]) = {NULL};
+    return expand_set_opt_string(args, empty, 0, numMatches, matches);
+}
+#endif
+
 /*
  * The 'iskeyword' option is changed.
  */
@@ -4467,7 +4506,10 @@ did_set_splitkeep(optset_T *args UNUSED)
     win_T	*wp;
     tabpage_T	*tp;
     FOR_ALL_TAB_WINDOWS(tp, wp)
+    {
 	wp->w_prev_height = wp->w_height;
+	wp->w_prev_winrow = wp->w_winrow;
+    }
     return did_set_opt_strings(p_spk, p_spk_values, FALSE);
 }
 

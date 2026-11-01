@@ -212,8 +212,33 @@ func Test_list_range_assign()
       call assert_equal([1, 2], l)
       LET l[-4 : -1] = [5, 6]
       call assert_equal([5, 6], l)
+
+      LET l = [0, 1, 2, 3]
+      LET l[-3 : -2] = [8, 9]
+      call assert_equal([0, 8, 9, 3], l)
+      LET l = [0, 1, 2, 3]
+      LET l[-3 : 2] = [8, 9]
+      call assert_equal([0, 8, 9, 3], l)
+      LET l = [0, 1, 2, 3]
+      LET l[1 : -2] = [8, 9]
+      call assert_equal([0, 8, 9, 3], l)
+      LET l = range(4)
+      LET l[-1 : -1] = [9]
+      call assert_equal([0, 1, 2, 9], l)
   END
   call v9.CheckLegacyAndVim9Success(lines)
+
+  let lines =<< trim END
+      VAR l = [0, 1, 2, 3]
+      LET l[-1 : -2] = [8, 9]
+  END
+  call v9.CheckLegacyAndVim9Failure(lines, 'E684:')
+
+  let lines =<< trim END
+      VAR l = [0, 1, 2, 3]
+      LET l[0 : -5] = [8, 9]
+  END
+  call v9.CheckLegacyAndVim9Failure(lines, 'E684:')
 
   let lines =<< trim END
     var l = [7]
@@ -602,6 +627,18 @@ func Test_dict_deepcopy()
   call v9.CheckLegacyAndVim9Success(lines)
 
   call assert_fails("call deepcopy([1, 2], 2)", 'E1212:')
+endfunc
+
+" deepcopy() keeps a null list, tuple or dict in a list or dict
+func Test_deepcopy_null_item()
+  let lines =<< trim END
+      VAR d = {'a': test_null_dict(), 'b': test_null_list(),
+            \ 'c': test_null_tuple(), 'd': 1}
+      call assert_equal(d, deepcopy(d))
+      VAR l = [test_null_dict(), test_null_list(), test_null_tuple(), 1]
+      call assert_equal(l, deepcopy(l))
+  END
+  call v9.CheckLegacyAndVim9Success(lines)
 endfunc
 
 " Locked variables
@@ -1589,6 +1626,24 @@ func Test_null_list()
   lockvar l
   call assert_equal(1, islocked('l'))
   unlockvar l
+endfunc
+
+" The key/value pairs can be edited and retain references to their values.
+func Test_dict_items_edit_result()
+  let shared = [1, 2]
+  let d = {'key': shared}
+  let pairs = items(d)
+  call assert_equal([['key', [1, 2]]], pairs)
+  call assert_true(pairs[0][1] is shared)
+  call add(pairs[0][1], 3)
+  call assert_equal([1, 2, 3], d.key)
+  unlet d
+  let pair = remove(pairs, 0)
+  call assert_equal('key', remove(pair, 0))
+  call insert(pair, 'new')
+  call add(pair, 42)
+  call assert_equal(['new', [1, 2, 3], 42], pair)
+  call assert_equal([], pairs)
 endfunc
 
 " Test for a null dict

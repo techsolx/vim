@@ -965,15 +965,16 @@ buf_write(
 	}
 
 	// The autocommands may have changed the name of the buffer, which may
-	// be kept in fname, ffname and sfname.
+	// be kept in fname, ffname and sfname.  A ":cd" may also have dropped
+	// the short name, then b_fname is the full name.
 	if (buf_ffname)
 	    ffname = buf->b_ffname;
 	if (buf_sfname)
-	    sfname = buf->b_sfname;
+	    sfname = buf->b_fname;
 	if (buf_fname_f)
 	    fname = buf->b_ffname;
 	if (buf_fname_s)
-	    fname = buf->b_sfname;
+	    fname = buf->b_fname;
     }
 
     if (cmdmod.cmod_flags & CMOD_LOCKMARKS)
@@ -1211,15 +1212,16 @@ buf_write(
 
 		// Check if we can create a file and set the owner/group/mode to
 		// the ones from the original file.
-		// First find a file name that doesn't exist yet (use some
-		// arbitrary numbers).
+		// First find a file name that doesn't exist yet.  Use the
+		// conventional hidden swap file name so that this short-lived
+		// probe is covered by standard Vim ignore patterns.
 		dirlen = (size_t)(gettail(fname) - fname);
 		vim_strncpy(tmp_fname, fname, dirlen);
 		fd = -1;
 		for (i = 4913; ; i += 123)
 		{
 		    vim_snprintf((char *)tmp_fname + dirlen,
-			sizeof(tmp_fname) - dirlen, "%d", i);
+			sizeof(tmp_fname) - dirlen, ".%d.swp", i);
 		    if (mch_lstat((char *)tmp_fname, &st) < 0)
 		    {
 			fd = mch_open((char *)tmp_fname,

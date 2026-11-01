@@ -2342,6 +2342,9 @@ def Test_expr8()
   v9.CheckDefAndScriptFailure(["var x = <nr>123"], 'E1010:', 1)
   v9.CheckDefFailure(["var x = <number>"], 'E1097:', 3)
   v9.CheckDefFailure(["var x = <number>string(1)"], 'E1012:', 1)
+  # A failed type check must free the value, a leak is only detected with
+  # valgrind or ASAN
+  v9.CheckScriptFailure(['vim9script', "var x = <number>'a'"], 'E1012: Type mismatch; expected number but got string', 2)
   v9.CheckScriptFailure(['vim9script', "var x = <number>"], 'E15:', 2)
   v9.CheckDefAndScriptFailure(["var x = <number >123"], 'E1068:', 1)
   v9.CheckDefAndScriptFailure(["var x = <number 123"], 'E1104:', 1)
@@ -2800,6 +2803,18 @@ def Test_expr9_lambda()
     eval (name + 2) / 3
   END
   v9.CheckDefAndScriptSuccess(lines)
+
+  # a lambda called after a constant operand
+  lines =<< trim END
+    assert_equal('ab', 'a' .. ((x) => x)('b'))
+    assert_equal('ab', 'a' .. (((x) => x)('b')))
+    assert_equal(3, 1 + ((x) => x)(2))
+    assert_equal('ab', 'a' .. ((x) => x)->call(['b']))
+    assert_equal('/a/x', ((cwdpath: string) => cwdpath
+          ->strpart(0, cwdpath->strridx('/vim')))('/a/vim/b')
+          .. '/x')
+  END
+  v9.CheckDefAndScriptSuccess(lines)
 enddef
 
 def Test_expr9_lambda_block()
@@ -2862,6 +2877,30 @@ def Test_expr9_lambda_block()
   END
   v9.CheckDefFailure(lines, 'E1145: Missing heredoc end marker: ENDIT', 0)
   v9.CheckScriptFailure(['vim9script'] + lines, 'E1145: Missing heredoc end marker: ENDIT', 2)
+
+  # An error in one function must not make the block lambda in the next
+  # function fail to compile in the same :defcompile.  Class methods are
+  # compiled in the order they are defined.
+  lines =<< trim END
+      vim9script
+      class C
+        static def Broken(): number
+          return 'x'
+        enddef
+        static def Healthy(): list<number>
+          return [1, 2]->map((_, v) => {
+            return v * 2
+          })
+        enddef
+      endclass
+      try
+        defcompile C
+      catch
+        assert_match('E1012:', v:exception)
+      endtry
+      assert_equal([2, 4], C.Healthy())
+  END
+  v9.CheckScriptSuccess(lines)
 enddef
 
 def NewLambdaWithComments(): func
@@ -3952,7 +3991,7 @@ def Test_expr9_method_call()
                     module: ''}
                     ], getloclist(0))
 
-      var result: bool = get({n: 0}, 'n', 0)
+      var result: bool = get({n: false}, 'n', false)
       assert_equal(false, result)
 
       assert_equal('+string+', 'string'->((s) => '+' .. s .. '+')())
@@ -4498,5 +4537,17 @@ func Test_expr_fails()
   call v9.CheckDefAndScriptFailure(["echo Func01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789()"], ['E1011:', 'E117:'], 1)
   call v9.CheckDefAndScriptFailure(["echo doesnotexist()"], 'E117:', 1)
 endfunc
+
+" Deeply nested parentheses must not run out of stack when compiling
+def Test_expr_deeply_nested_parens()
+  var lines = [
+    'vim9script',
+    'def F()',
+    '  var x = ' .. repeat('(', 10000) .. '1' .. repeat(')', 10000),
+    'enddef',
+    'defcompile F',
+  ]
+  v9.CheckSourceFailure(lines, 'E1169:')
+enddef
 
 " vim: shiftwidth=2 sts=2 expandtab

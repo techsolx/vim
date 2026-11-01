@@ -2509,6 +2509,9 @@ free_buf_options(
     clear_string_option(&buf->b_p_cinw);
     clear_string_option(&buf->b_p_cot);
     clear_string_option(&buf->b_p_cpt);
+#ifdef BACKSLASH_IN_FILENAME
+    clear_string_option(&buf->b_p_csl);
+#endif
 #ifdef FEAT_COMPL_FUNC
     clear_string_option(&buf->b_p_cfu);
     free_callback(&buf->b_cfu_cb);
@@ -3656,7 +3659,9 @@ setfname(
 		return FAIL;
 	    }
 	    // delete from the list
+	    ++buf->b_locked;
 	    close_buffer(NULL, obuf, DOBUF_WIPE, FALSE, FALSE, FALSE);
+	    --buf->b_locked;
 	}
 	sfname = vim_strsave(sfname);
 	if (ffname == NULL || sfname == NULL)

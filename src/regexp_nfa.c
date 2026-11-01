@@ -246,9 +246,16 @@ static const int nfa_classcodes[] = {
 // Variables only used in nfa_regcomp() and descendants.
 static int nfa_re_flags; // re_flags passed to nfa_regcomp()
 static int *post_start;  // holds the postfix form of r.e.
+static int post_start_len;  // size of allocated post_start (in ints)
 static int *post_end;
 static int *post_ptr;
 static int nfa_reg_parse_depth;	// nesting depth in nfa_reg()
+
+// The postfix list (post_start) and fragment stack (nfa_stack) are reused
+// across compilations; a buffer that grew past these sizes for a big pattern
+// is freed afterwards instead of being kept, to avoid holding much memory.
+#define NFA_POSTFIX_KEEP	10000	// number of ints (~40 Kbyte)
+#define NFA_STACK_KEEP		4000	// number of Frag_T (~64 Kbyte)
 
 // Set when the pattern should use the NFA engine.
 // E.g. [[:upper:]] only allows 8bit characters for BT engine,
@@ -303,11 +310,21 @@ nfa_regcomp_start(
     // Size for postfix representation of expr.
     postfix_size = sizeof(int) * nstate_max;
 
-    post_start = alloc(postfix_size);
-    if (post_start == NULL)
-	return FAIL;
+    // Reuse the postfix buffer across compilations, only growing it when the
+    // estimate exceeds the current size; it is freed in free_regexp_stuff().
+    if (post_start == NULL || post_start_len < nstate_max)
+    {
+	vim_free(post_start);
+	post_start = alloc(postfix_size);
+	if (post_start == NULL)
+	{
+	    post_start_len = 0;
+	    return FAIL;
+	}
+	post_start_len = nstate_max;
+    }
     post_ptr = post_start;
-    post_end = post_start + nstate_max;
+    post_end = post_start + post_start_len;
     wants_nfa = FALSE;
     rex.nfa_has_zend = FALSE;
     rex.nfa_has_backref = FALSE;
@@ -527,6 +544,7 @@ realloc_post_list(void)
     mch_memmove(new_start, post_start, nstate_max * sizeof(int));
     old_start = post_start;
     post_start = new_start;
+    post_start_len = new_max;
     post_ptr = new_start + (post_ptr - old_start);
     post_end = post_start + new_max;
     vim_free(old_start);
@@ -546,102 +564,14 @@ realloc_post_list(void)
     static int
 nfa_recognize_char_class(char_u *start, char_u *end, int extra_newl)
 {
-#define CLASS_not		0x80
-#define CLASS_af		0x40
-#define CLASS_AF		0x20
-#define CLASS_az		0x10
-#define CLASS_AZ		0x08
-#define CLASS_o7		0x04
-#define CLASS_o9		0x02
-#define CLASS_underscore	0x01
+    int		newl;
+    int		config = get_char_class_bits(start, end, &newl);
 
-    int		newl = FALSE;
-    char_u	*p;
-    int		config = 0;
+    if (config < 0)
+	return FAIL;
 
     if (extra_newl == TRUE)
 	newl = TRUE;
-
-    if (*end != ']')
-	return FAIL;
-    p = start;
-    if (*p == '^')
-    {
-	config |= CLASS_not;
-	p++;
-    }
-
-    while (p < end)
-    {
-	if (p + 2 < end && *(p + 1) == '-')
-	{
-	    switch (*p)
-	    {
-		case '0':
-		    if (*(p + 2) == '9')
-		    {
-			config |= CLASS_o9;
-			break;
-		    }
-		    if (*(p + 2) == '7')
-		    {
-			config |= CLASS_o7;
-			break;
-		    }
-		    return FAIL;
-
-		case 'a':
-		    if (*(p + 2) == 'z')
-		    {
-			config |= CLASS_az;
-			break;
-		    }
-		    if (*(p + 2) == 'f')
-		    {
-			config |= CLASS_af;
-			break;
-		    }
-		    return FAIL;
-
-		case 'A':
-		    if (*(p + 2) == 'Z')
-		    {
-			config |= CLASS_AZ;
-			break;
-		    }
-		    if (*(p + 2) == 'F')
-		    {
-			config |= CLASS_AF;
-			break;
-		    }
-		    return FAIL;
-
-		default:
-		    return FAIL;
-	    }
-	    p += 3;
-	}
-	else if (p + 1 < end && *p == '\\' && *(p + 1) == 'n')
-	{
-	    newl = TRUE;
-	    p += 2;
-	}
-	else if (*p == '_')
-	{
-	    config |= CLASS_underscore;
-	    p ++;
-	}
-	else if (*p == '\n')
-	{
-	    newl = TRUE;
-	    p ++;
-	}
-	else
-	    return FAIL;
-    } // while (p < end)
-
-    if (p != end)
-	return FAIL;
 
     if (newl == TRUE)
 	extra_newl = NFA_ADD_NL;
@@ -3036,6 +2966,10 @@ struct Frag
 };
 typedef struct Frag Frag_T;
 
+// Reused across compilations by post2nfa(); freed in free_regexp_stuff().
+static Frag_T *nfa_stack;
+static int nfa_stack_len;
+
 /*
  * Initialize a Frag_T struct and return it.
  */
@@ -3421,16 +3355,25 @@ post2nfa(int *postfix, int *end, int nfa_calc_size)
 		    if (stackp < stack)			\
 		    {					\
 			st_error(postfix, end, p);	\
-			vim_free(stack);		\
 			return NULL;			\
 		    }
 
     if (nfa_calc_size == FALSE)
     {
-	// Allocate space for the stack. Max states on the stack: "nstate".
-	stack = ALLOC_MULT(Frag_T, nstate + 1);
-	if (stack == NULL)
-	    return NULL;
+	// Reuse the fragment stack across compilations, growing when needed;
+	// it is freed in free_regexp_stuff().
+	if (nfa_stack == NULL || nfa_stack_len < nstate + 1)
+	{
+	    vim_free(nfa_stack);
+	    nfa_stack = ALLOC_MULT(Frag_T, nstate + 1);
+	    if (nfa_stack == NULL)
+	    {
+		nfa_stack_len = 0;
+		return NULL;
+	    }
+	    nfa_stack_len = nstate + 1;
+	}
+	stack = nfa_stack;
 	stackp = stack;
 	stack_end = stack + (nstate + 1);
     }
@@ -3511,7 +3454,7 @@ post2nfa(int *postfix, int *end, int nfa_calc_size)
 	    s = alloc_state(NFA_SPLIT, e.start, NULL);
 	    if (s == NULL)
 		goto theend;
-	    PUSH(frag(s, append(e.out, list1(&s->out1))));
+	    PUSH(frag(s, append(list1(&s->out1), e.out)));
 	    break;
 
 	case NFA_QUEST_NONGREEDY:
@@ -3525,7 +3468,7 @@ post2nfa(int *postfix, int *end, int nfa_calc_size)
 	    s = alloc_state(NFA_SPLIT, NULL, e.start);
 	    if (s == NULL)
 		goto theend;
-	    PUSH(frag(s, append(e.out, list1(&s->out))));
+	    PUSH(frag(s, append(list1(&s->out), e.out)));
 	    break;
 
 	case NFA_END_COLL:
@@ -3611,7 +3554,7 @@ post2nfa(int *postfix, int *end, int nfa_calc_size)
 		if (e1.out == NULL)
 		    e1 = e;
 		patch(e.out, s1);
-		append(e1.out, list1(&s->out1));
+		e1.out = append(list1(&s->out1), e1.out);
 		s1 = s;
 	    }
 	    PUSH(frag(s, e1.out));
@@ -3897,16 +3840,10 @@ post2nfa(int *postfix, int *end, int nfa_calc_size)
 
     e = POP();
     if (stackp != stack)
-    {
-	vim_free(stack);
 	EMSG_RET_NULL(_(e_nfa_regexp_while_converting_from_postfix_to_nfa_too_many_stats_left_on_stack));
-    }
 
     if (istate >= nstate)
-    {
-	vim_free(stack);
 	EMSG_RET_NULL(_(e_nfa_regexp_not_enough_space_to_store_whole_nfa));
-    }
 
     matchstate = &state_ptr[istate++]; // the match state
     matchstate->c = NFA_MATCH;
@@ -3917,7 +3854,6 @@ post2nfa(int *postfix, int *end, int nfa_calc_size)
     ret = e.start;
 
 theend:
-    vim_free(stack);
     return ret;
 
 #undef POP1
@@ -4122,7 +4058,7 @@ static int	    nfa_match;
 static int	   *nfa_timed_out;
 #endif
 
-static void copy_sub(regsub_T *to, regsub_T *from);
+static inline void copy_sub(regsub_T *to, regsub_T *from);
 static int pim_equal(nfa_pim_T *one, nfa_pim_T *two);
 
 /*
@@ -4157,25 +4093,36 @@ clear_sub(regsub_T *sub)
 /*
  * Copy the submatches from "from" to "to".
  */
-    static void
+    static inline void
 copy_sub(regsub_T *to, regsub_T *from)
 {
     to->in_use = from->in_use;
     if (from->in_use <= 0)
 	return;
 
-    // Copy the match start and end positions.
+    // Copy the match start and end positions.  addstate() calls this for
+    // every state it adds, so it is very hot.  Patterns without capturing
+    // groups only use subexpression zero (the whole match), so special-case
+    // "in_use == 1" with a direct assignment to avoid the mch_memmove() call.
     if (REG_MULTI)
     {
-	mch_memmove(&to->list.multi[0],
-		&from->list.multi[0],
-		sizeof(struct multipos) * from->in_use);
+	if (from->in_use == 1)
+	    to->list.multi[0] = from->list.multi[0];
+	else
+	    mch_memmove(&to->list.multi[0],
+		    &from->list.multi[0],
+		    sizeof(struct multipos) * from->in_use);
 	to->orig_start_col = from->orig_start_col;
     }
     else
-	mch_memmove(&to->list.line[0],
-		&from->list.line[0],
-		sizeof(struct linepos) * from->in_use);
+    {
+	if (from->in_use == 1)
+	    to->list.line[0] = from->list.line[0];
+	else
+	    mch_memmove(&to->list.line[0],
+		    &from->list.line[0],
+		    sizeof(struct linepos) * from->in_use);
+    }
 }
 
 /*
@@ -5693,12 +5640,8 @@ find_match_text(colnr_T *startcol, int regstart, char_u *match_text)
     for (;;)
     {
 	match = TRUE;
-	// skip regstart
-	len2 = MB_CHAR2LEN(regstart);
-	if (enc_utf8 && len2 > 1 && MB_CHAR2LEN(PTR2CHAR(rex.line + col)) != len2)
-	    // because of case-folding of the previously matched text, we may need
-	    // to skip fewer bytes than mb_char2len(regstart)
-	    len2 = mb_char2len(utf_fold(regstart));
+	// Skip the input character: case-folding can change its byte length.
+	len2 = MB_CPTR2LEN(rex.line + col);
 	for (len1 = 0; match_text[len1] != NUL; len1 += MB_CHAR2LEN(c1))
 	{
 	    c1 = PTR2CHAR(match_text + len1);
@@ -5734,13 +5677,75 @@ find_match_text(colnr_T *startcol, int regstart, char_u *match_text)
 	}
 
 	// Try finding regstart after the current match.
-	col += MB_CHAR2LEN(regstart); // skip regstart
+	col += MB_CPTR2LEN(rex.line + col); // skip the input character
 	if (skip_to_start(regstart, &col) == FAIL)
 	    break;
     }
 
     *startcol = col;
     return 0L;
+}
+
+/*
+ * Check whether the composing characters at the current input position match
+ * the NFA composing sub-expression that starts at "sta" (the first state
+ * after NFA_COMPOSING).  "curc" is the base character and "clen" its byte
+ * length.
+ * Returns OK when it matches, FAIL otherwise.
+ */
+    static int
+match_composing(nfa_state_T *sta, int curc, int clen)
+{
+    int		mc = curc;
+    int		len = 0;
+    int		cchars[MAX_MCO];
+    int		ccount = 0;
+    int		j;
+
+    if (utf_iscomposing(sta->c))
+	// Only match composing character(s), ignore base character.  Used
+	// for ".{composing}" and "{composing}" (no preceding character).
+	len += mb_char2len(mc);
+
+    if (rex.reg_icombine && len == 0)
+	// If \Z was present, then ignore composing characters.  When
+	// ignoring the base character this always matches.
+	return sta->c == curc ? OK : FAIL;
+
+    // Check base character matches first, unless ignored.
+    if (len == 0 && mc != sta->c)
+	return FAIL;
+
+    if (len == 0)
+    {
+	len += mb_char2len(mc);
+	sta = sta->out;
+    }
+
+    // We don't care about the order of composing characters.  Get them into
+    // cchars[] first.
+    while (len < clen)
+    {
+	mc = mb_ptr2char(rex.input + len);
+	cchars[ccount++] = mc;
+	len += mb_char2len(mc);
+	if (ccount == MAX_MCO)
+	    break;
+    }
+
+    // Check that each composing char in the pattern matches a composing char
+    // in the text.  We do not check if all composing chars are matched.
+    while (sta->c != NFA_END_COMPOSING)
+    {
+	for (j = 0; j < ccount; ++j)
+	    if (cchars[j] == sta->c)
+		break;
+	if (j == ccount)
+	    return FAIL;
+	sta = sta->out;
+    }
+
+    return OK;
 }
 
 /*
@@ -5891,8 +5896,19 @@ nfa_regmatch(
 
 	if (has_mbyte)
 	{
-	    curc = (*mb_ptr2char)(rex.input);
-	    clen = (*mb_ptr2len)(rex.input);
+	    // Fast path for an ASCII byte not followed by a composing
+	    // character, matching the check in utfc_ptr2len().  Avoids two
+	    // indirect calls for the common case.
+	    if (rex.input[0] != NUL && rex.input[0] < 0x80 && rex.input[1] < 0x80)
+	    {
+		curc = rex.input[0];
+		clen = 1;
+	    }
+	    else
+	    {
+		curc = (*mb_ptr2char)(rex.input);
+		clen = (*mb_ptr2len)(rex.input);
+	    }
 	}
 	else
 	{
@@ -6389,74 +6405,9 @@ nfa_regmatch(
 
 	    case NFA_COMPOSING:
 	    {
-		int	    mc = curc;
-		int	    len = 0;
 		nfa_state_T *end;
-		nfa_state_T *sta;
-		int	    cchars[MAX_MCO];
-		int	    ccount = 0;
-		int	    j;
 
-		sta = t->state->out;
-		len = 0;
-		if (utf_iscomposing(sta->c))
-		{
-		    // Only match composing character(s), ignore base
-		    // character.  Used for ".{composing}" and "{composing}"
-		    // (no preceding character).
-		    len += mb_char2len(mc);
-		}
-		if (rex.reg_icombine && len == 0)
-		{
-		    // If \Z was present, then ignore composing characters.
-		    // When ignoring the base character this always matches.
-		    if (sta->c != curc)
-			result = FAIL;
-		    else
-			result = OK;
-		    while (sta->c != NFA_END_COMPOSING)
-			sta = sta->out;
-		}
-
-		// Check base character matches first, unless ignored.
-		else if (len > 0 || mc == sta->c)
-		{
-		    if (len == 0)
-		    {
-			len += mb_char2len(mc);
-			sta = sta->out;
-		    }
-
-		    // We don't care about the order of composing characters.
-		    // Get them into cchars[] first.
-		    while (len < clen)
-		    {
-			mc = mb_ptr2char(rex.input + len);
-			cchars[ccount++] = mc;
-			len += mb_char2len(mc);
-			if (ccount == MAX_MCO)
-			    break;
-		    }
-
-		    // Check that each composing char in the pattern matches a
-		    // composing char in the text.  We do not check if all
-		    // composing chars are matched.
-		    result = OK;
-		    while (sta->c != NFA_END_COMPOSING)
-		    {
-			for (j = 0; j < ccount; ++j)
-			    if (cchars[j] == sta->c)
-				break;
-			if (j == ccount)
-			{
-			    result = FAIL;
-			    break;
-			}
-			sta = sta->out;
-		    }
-		}
-		else
-		    result = FAIL;
+		result = match_composing(t->state->out, curc, clen);
 
 		end = t->state->out1;	    // NFA_END_COMPOSING
 		ADD_STATE_IF_MATCH(end);
@@ -6501,74 +6452,10 @@ nfa_regmatch(
 		{
 		    if (state->c == NFA_COMPOSING)
 		    {
-			int	    mc = curc;
-			int	    len = 0;
 			nfa_state_T *end;
-			nfa_state_T *sta;
-			int	    cchars[MAX_MCO];
-			int	    ccount = 0;
-			int	    j;
 
-			sta = t->state->out->out;
-			len = 0;
-			if (utf_iscomposing(sta->c))
-			{
-			    // Only match composing character(s), ignore base
-			    // character.  Used for ".{composing}" and "{composing}"
-			    // (no preceding character).
-			    len += mb_char2len(mc);
-			}
-			if (rex.reg_icombine && len == 0)
-			{
-			    // If \Z was present, then ignore composing characters.
-			    // When ignoring the base character this always matches.
-			    if (sta->c != curc)
-				result = FAIL;
-			    else
-				result = OK;
-			    while (sta->c != NFA_END_COMPOSING)
-				sta = sta->out;
-			}
-			// Check base character matches first, unless ignored.
-			else if (len > 0 || mc == sta->c)
-//			if (len > 0 || mc == sta->c)
-			{
-			    if (len == 0)
-			    {
-				len += mb_char2len(mc);
-				sta = sta->out;
-			    }
-
-			    // We don't care about the order of composing characters.
-			    // Get them into cchars[] first.
-			    while (len < clen)
-			    {
-				mc = mb_ptr2char(rex.input + len);
-				cchars[ccount++] = mc;
-				len += mb_char2len(mc);
-				if (ccount == MAX_MCO)
-				    break;
-			    }
-
-			    // Check that each composing char in the pattern matches a
-			    // composing char in the text.  We do not check if all
-			    // composing chars are matched.
-			    result = OK;
-			    while (sta->c != NFA_END_COMPOSING)
-			    {
-				for (j = 0; j < ccount; ++j)
-				    if (cchars[j] == sta->c)
-					break;
-				if (j == ccount)
-				{
-				    result = FAIL;
-				    break;
-				}
-				sta = sta->out;
-			    }
-			}
-			else
-			    result = FAIL;
+			result = match_composing(t->state->out->out, curc,
+									clen);
 
 			if (t->state->out->out1 != NULL
 				&& t->state->out->out1->c == NFA_END_COMPOSING)
@@ -6671,13 +6558,13 @@ nfa_regmatch(
 		break;
 
 	    case NFA_KWORD:	//  \k
-		result = vim_iswordp_buf(rex.input, rex.reg_buf);
+		result = vim_iswordc_buf(curc, rex.reg_buf);
 		ADD_STATE_IF_MATCH(t->state);
 		break;
 
 	    case NFA_SKWORD:	//  \K
 		result = !VIM_ISDIGIT(curc)
-				     && vim_iswordp_buf(rex.input, rex.reg_buf);
+				     && vim_iswordc_buf(curc, rex.reg_buf);
 		ADD_STATE_IF_MATCH(t->state);
 		break;
 
@@ -6692,12 +6579,12 @@ nfa_regmatch(
 		break;
 
 	    case NFA_PRINT:	//  \p
-		result = vim_isprintc(PTR2CHAR(rex.input));
+		result = vim_isprintc(curc);
 		ADD_STATE_IF_MATCH(t->state);
 		break;
 
 	    case NFA_SPRINT:	//  \P
-		result = !VIM_ISDIGIT(curc) && vim_isprintc(PTR2CHAR(rex.input));
+		result = !VIM_ISDIGIT(curc) && vim_isprintc(curc);
 		ADD_STATE_IF_MATCH(t->state);
 		break;
 
@@ -7744,8 +7631,20 @@ nfa_regcomp(char_u *expr, int re_flags)
 #endif
 
 out:
-    VIM_CLEAR(post_start);
+    // The postfix list and fragment stack are reused by the next compilation
+    // (and freed in free_regexp_stuff()), but drop ones that grew large for a
+    // big pattern to avoid holding much memory.
+    if (post_start_len > NFA_POSTFIX_KEEP)
+    {
+	VIM_CLEAR(post_start);
+	post_start_len = 0;
+    }
     post_ptr = post_end = NULL;
+    if (nfa_stack_len > NFA_STACK_KEEP)
+    {
+	VIM_CLEAR(nfa_stack);
+	nfa_stack_len = 0;
+    }
     state_ptr = NULL;
     return (regprog_T *)prog;
 

@@ -183,7 +183,10 @@ arg_exists(
 									 == OK)
 	{
 	    if (gen_load_outer != NULL)
+	    {
 		++*gen_load_outer;
+		cctx->ctx_outer_used = TRUE;
+	    }
 	    return OK;
 	}
     }
@@ -515,9 +518,11 @@ use_typecheck(type_T *actual, type_T *expected)
 	return TRUE;
     if (actual->tt_type == VAR_OBJECT && expected->tt_type == VAR_OBJECT)
 	return TRUE;
-    if ((actual->tt_type == VAR_LIST
-		|| actual->tt_type == VAR_TUPLE
-		|| actual->tt_type == VAR_DICT)
+    if (actual->tt_type == VAR_TUPLE && expected->tt_type == VAR_TUPLE)
+	// A tuple type doesn't have a member type.  The number of items of
+	// "actual" is not known.
+	return TRUE;
+    if ((actual->tt_type == VAR_LIST || actual->tt_type == VAR_DICT)
 	    && actual->tt_type == expected->tt_type)
 	// This takes care of a nested list or dict.
 	return use_typecheck(actual->tt_member, expected->tt_member);
@@ -1118,6 +1123,26 @@ compile_nested_function(exarg_T *eap, cctx_T *cctx, garray_T *lines_to_free)
 	goto theend;
     }
 
+    // A type variable cannot have the name of the function.  The function is
+    // defined with the "<lambda>" name, check it here.
+    if (bracket_start != NULL)
+    {
+	size_t	len = STRLEN(func_name);
+
+	for (char_u *t = bracket_start + 1; *t != '>' && *t != NUL; )
+	{
+	    char_u *te = to_name_end(t, FALSE);
+
+	    if ((size_t)(te - t) == len && STRNCMP(t, func_name, len) == 0)
+	    {
+		semsg(_(e_redefining_script_item_str), func_name);
+		r = FAIL;
+		goto theend;
+	    }
+	    t = te == t ? t + 1 : te;
+	}
+    }
+
     // Make sure "KeyTyped" is not set, it may cause indent to be written.
     int save_KeyTyped = KeyTyped;
     KeyTyped = FALSE;
@@ -1174,6 +1199,7 @@ compile_nested_function(exarg_T *eap, cctx_T *cctx, garray_T *lines_to_free)
 	    func_ptr_unref(ufunc);
 	    goto theend;
 	}
+	lvar->lv_ufunc = ufunc;
 	if (generate_FUNCREF(cctx, ufunc, NULL, FALSE, 0, &funcref_isn_idx) == FAIL)
 	{
 	    func_ptr_unref(ufunc);
@@ -1493,6 +1519,7 @@ valid_dest_reg(int name)
  * For an option "option_scope" is set.
  * For a v:var "vimvaridx" is set.
  * "type" is set to the destination type if known, unchanted otherwise.
+ * When "has_index" is TRUE an item of the variable is assigned to.
  * Return FAIL if an error message was given.
  */
     int
@@ -1500,6 +1527,7 @@ get_var_dest(
 	char_u		*name,
 	assign_dest_T	*dest,
 	cmdidx_T	cmdidx,
+	int		has_index,
 	int		*option_scope,
 	int		*vimvaridx,
 	type_T		**type,
@@ -1600,8 +1628,9 @@ get_var_dest(
 	    semsg(_(e_variable_not_found_str), name);
 	    return FAIL;
 	}
+	// An item of a read-only variable can be changed, as when not compiled.
 	// We use the current value of "sandbox" here, is that OK?
-	if (var_check_ro(di_flags, name, FALSE))
+	if (!has_index && var_check_ro(di_flags, name, FALSE))
 	    return FAIL;
 	*dest = dest_vimvar;
 	vtv = get_vim_var_tv(*vimvaridx);
@@ -1961,6 +1990,7 @@ compile_lhs_var_dest(
     int	    declare_error = FALSE;
 
     if (get_var_dest(lhs->lhs_name, &lhs->lhs_dest, cmdidx,
+				lhs->lhs_has_index,
 				&lhs->lhs_opt_flags, &lhs->lhs_vimvaridx,
 				&lhs->lhs_type, cctx) == FAIL)
 	return FAIL;
@@ -2486,12 +2516,14 @@ compile_assign_index(
 
 /*
  * For a LHS with an index, load the variable to be indexed.
+ * "range" is TRUE for "var[a : b]".
  */
     static int
 compile_load_lhs(
 	lhs_T	*lhs,
 	char_u	*var_start,
 	type_T	*rhs_type,
+	int	range,
 	cctx_T	*cctx)
 {
     if (lhs->lhs_dest == dest_expr)
@@ -2534,13 +2566,21 @@ compile_load_lhs(
 	// type yet, it depends on what member is used.
 	// The top item in the stack is the Dict, followed by the key and then
 	// the type of the value.
+	// For "var[a : b]" the value is a List or Blob, below two indexes.
 	vartype_T vartype = lhs->lhs_type->tt_type;
-	type_T *member_type = lhs->lhs_type->tt_member;
-	if (rhs_type != NULL && member_type != NULL
+	type_T *expected = lhs->lhs_type->tt_member;
+	int offset = -3;
+	if (range)
+	{
+	    expected = vartype == VAR_LIST || vartype == VAR_BLOB
+						       ? lhs->lhs_type : NULL;
+	    offset = -4;
+	}
+	if (rhs_type != NULL && expected != NULL
 		&& vartype != VAR_OBJECT && vartype != VAR_CLASS
 		&& rhs_type != &t_void
-		&& need_type(rhs_type, member_type, 0,
-					    -3, 0, cctx, FALSE, FALSE) == FAIL)
+		&& need_type(rhs_type, expected, 0, offset, 0, cctx, FALSE,
+								FALSE) == FAIL)
 	    return FAIL;
 
 	return OK;
@@ -2593,7 +2633,8 @@ compile_load_lhs_with_index(lhs_T *lhs, char_u *var_start, cctx_T *cctx)
 	else
 	{
 	    // load object variable or argument
-	    if (compile_load_lhs(lhs, var_start, lhs->lhs_type, cctx) == FAIL)
+	    if (compile_load_lhs(lhs, var_start, lhs->lhs_type, FALSE, cctx)
+								       == FAIL)
 		return FAIL;
 	}
 	if (IS_INTERFACE(cl))
@@ -2606,7 +2647,7 @@ compile_load_lhs_with_index(lhs_T *lhs, char_u *var_start, cctx_T *cctx)
 	char_u *dot = vim_strchr(var_start, '.');
 	if (dot == NULL)
 	{
-	    check_type_is_value(lhs->lhs_type);
+	    (void)check_type_is_value(lhs->lhs_type);
 	    return FAIL;
 	}
 
@@ -2620,7 +2661,7 @@ compile_load_lhs_with_index(lhs_T *lhs, char_u *var_start, cctx_T *cctx)
 	return generate_CLASSMEMBER(cctx, TRUE, cl, lhs->lhs_member_idx);
     }
 
-    if (compile_load_lhs(lhs, var_start, NULL, cctx) == FAIL)
+    if (compile_load_lhs(lhs, var_start, NULL, FALSE, cctx) == FAIL)
 	return FAIL;
 
     if (lhs->lhs_has_index)
@@ -2731,7 +2772,7 @@ compile_assign_unlet(
     // - index
     // - for [a : b] second index
     // - variable
-    if (compile_load_lhs(lhs, var_start, rhs_type, cctx) == FAIL)
+    if (compile_load_lhs(lhs, var_start, rhs_type, range, cctx) == FAIL)
 	return FAIL;
 
     if (dest_type == VAR_LIST
@@ -2786,7 +2827,7 @@ compile_assign_unlet(
     else
     {
 	if (dest_type == VAR_TUPLE)
-	    emsg(_(e_tuple_is_immutable));
+	    emsg(range ? _(e_cannot_slice_tuple) : _(e_tuple_is_immutable));
 	else
 	    emsg(_(e_indexable_type_required));
 	return FAIL;
@@ -3269,11 +3310,13 @@ compile_assign_set_lhs_type_from_rhs(
     type_T *type;
 
     // An empty list or dict has a &t_unknown member, for a variable that
-    // implies &t_any.
+    // implies &t_any.  Similarly for an empty tuple.
     if (rhs_type == &t_list_empty)
 	type = &t_list_any;
     else if (rhs_type == &t_dict_empty)
 	type = &t_dict_any;
+    else if (rhs_type == &t_tuple_empty)
+	type = &t_tuple_any;
     else if (rhs_type == &t_unknown)
 	type = &t_any;
     else
@@ -3311,9 +3354,10 @@ compile_assign_valid_rhs_type(
     }
 
     // If assigning to a list or dict member, use the member type.
-    // Not for "list[:] =".
-    if (lhs->lhs_has_index &&
-	    !has_list_index(cac->cac_var_start + lhs->lhs_varlen, cctx))
+    // Not for "list[:] =", unless the list is an item or a member,
+    // "ll[0][:] =": its type is checked once it has been compiled.
+    if (lhs->lhs_has_index && (lhs->lhs_dest == dest_expr
+	    || !has_list_index(cac->cac_var_start + lhs->lhs_varlen, cctx)))
 	use_type = lhs->lhs_member_type;
 
     if (need_type_where(rhs_type, use_type, 0, -1, where, cctx, FALSE,
@@ -3532,7 +3576,10 @@ compile_assign_compound_op(cctx_T *cctx, cac_T *cac)
 		&& need_type(stacktype, expected, 0, -1, 0, cctx,
 					FALSE, FALSE) == FAIL)
 	    return FAIL;
-	else if (may_generate_2STRING(-1, TOSTRING_NONE, cctx) == FAIL)
+	// As with "a .. b", convert both operands: when the target type is
+	// any, its current value can be a number.
+	else if (may_generate_2STRING(-2, TOSTRING_NONE, cctx) == FAIL
+		|| may_generate_2STRING(-1, TOSTRING_NONE, cctx) == FAIL)
 	    return FAIL;
     }
     else
@@ -4574,14 +4621,17 @@ compile_def_function_body(
 	    return FAIL;
 	}
 
-	// When processing the end of an if-else block, don't clear the
-	// "ctx_had_throw" flag.  If an if-else block ends in a "throw"
+	// When processing the end of an if-else or try-catch block, don't
+	// clear the "ctx_had_throw" flag.  If such a block ends in a "throw"
 	// statement, then it is considered to end in a "return" statement.
 	// The "ctx_had_throw" is cleared immediately after processing the
-	// if-else block ending statement.
+	// block ending statement.
 	// Otherwise, clear the "had_throw" flag.
 	if (ea.cmdidx != CMD_else && ea.cmdidx != CMD_elseif
-						&& ea.cmdidx != CMD_endif)
+						&& ea.cmdidx != CMD_endif
+						&& ea.cmdidx != CMD_catch
+						&& ea.cmdidx != CMD_finally
+						&& ea.cmdidx != CMD_endtry)
 	    cctx->ctx_had_throw = FALSE;
 
 	p = skipwhite(p);
@@ -4678,9 +4728,14 @@ compile_def_function_body(
 		    break;
 	    case CMD_continue:
 		    line = compile_continue(p, cctx);
+		    // "continue" unconditionally jumps back to the loop,
+		    // like a "return".
+		    cctx->ctx_had_return = TRUE;
 		    break;
 	    case CMD_break:
 		    line = compile_break(p, cctx);
+		    // "break" unconditionally exits the loop, like a "return".
+		    cctx->ctx_had_return = TRUE;
 		    break;
 
 	    case CMD_try:
@@ -4689,13 +4744,16 @@ compile_def_function_body(
 	    case CMD_catch:
 		    line = compile_catch(p, cctx);
 		    cctx->ctx_had_return = FALSE;
+		    cctx->ctx_had_throw = FALSE;
 		    break;
 	    case CMD_finally:
 		    line = compile_finally(p, cctx);
 		    cctx->ctx_had_return = FALSE;
+		    cctx->ctx_had_throw = FALSE;
 		    break;
 	    case CMD_endtry:
 		    line = compile_endtry(p, cctx);
+		    cctx->ctx_had_throw = FALSE;
 		    break;
 	    case CMD_throw:
 		    line = compile_throw(p, cctx);
@@ -4780,7 +4838,7 @@ compile_def_function_body(
 	    case CMD_open:
 	    case CMD_t:
 	    case CMD_xit:
-		    not_in_vim9(&ea);
+		    not_in_vim9(&ea, false);
 		    return FAIL;
 
 	    case CMD_SIZE:

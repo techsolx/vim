@@ -1134,25 +1134,11 @@ win_split_ins(
 	if (oldwin->w_p_wfw)
 	    win_setwidth_win(oldwin->w_width + new_size + 1, oldwin);
 
-	// Only make all windows the same width if one of them (except oldwin)
-	// is wider than one of the split windows.
+	// Make all windows the same width if 'equalalways' is set, 'ead'
+	// not set to 'v', a size was not provided and there is a parent frame.
 	if (!do_equal && p_ea && size == 0 && *p_ead != 'v'
-					 && oldwin->w_frame->fr_parent != NULL)
-	{
-	    frp = oldwin->w_frame->fr_parent->fr_child;
-	    while (frp != NULL)
-	    {
-		if (frp->fr_win != oldwin && frp->fr_win != NULL
-			&& (frp->fr_win->w_width > new_size
-			    || frp->fr_win->w_width > oldwin->w_width
-							      - new_size - 1))
-		{
-		    do_equal = TRUE;
-		    break;
-		}
-		frp = frp->fr_next;
-	    }
-	}
+	    && oldwin->w_frame->fr_parent != NULL)
+	    do_equal = TRUE;
     }
     else
     {
@@ -1236,25 +1222,11 @@ win_split_ins(
 	    oldwin_height = oldwin->w_height;
 	}
 
-	// Only make all windows the same height if one of them (except oldwin)
-	// is higher than one of the split windows.
+	// Make all windows the same height if 'equalalways' is set, 'ead' is
+	// not set to 'h', a size was not provided and there is a parent frame.
 	if (!do_equal && p_ea && size == 0 && *p_ead != 'h'
-	   && oldwin->w_frame->fr_parent != NULL)
-	{
-	    frp = oldwin->w_frame->fr_parent->fr_child;
-	    while (frp != NULL)
-	    {
-		if (frp->fr_win != oldwin && frp->fr_win != NULL
-			&& (frp->fr_win->w_height > new_size
-			    || frp->fr_win->w_height > oldwin_height - new_size
-						- statusline_height(oldwin)))
-		{
-		    do_equal = TRUE;
-		    break;
-		}
-		frp = frp->fr_next;
-	    }
-	}
+	    && oldwin->w_frame->fr_parent != NULL)
+	    do_equal = TRUE;
     }
 
     /*
@@ -3719,7 +3691,7 @@ winframe_remove(
 	    }
 	}
 	frame_new_height(frp2, frp2->fr_height + frp_close->fr_height,
-			    frp2 == frp_close->fr_next, FALSE, FALSE);
+			    frp2 == frp_close->fr_next, !frame_fixed_height(frp2), FALSE);
 	*dirp = 'v';
     }
     else
@@ -3756,7 +3728,7 @@ winframe_remove(
 	    }
 	}
 	frame_new_width(frp2, frp2->fr_width + frp_close->fr_width,
-			    frp2 == frp_close->fr_next, FALSE);
+			    frp2 == frp_close->fr_next, !frame_fixed_width(frp2));
 	*dirp = 'h';
     }
 
@@ -5150,6 +5122,10 @@ leave_tabpage(
     if (gui.in_use)
 	gui_remove_scrollbars();
 #endif
+#ifdef FEAT_IMAGE
+    // Clear all image placements, they will be redrawn again if needed.
+    clear_all_image_placements();
+#endif
     tp->tp_curwin = curwin;
     tp->tp_prevwin = prevwin;
     tp->tp_firstwin = firstwin;
@@ -6239,16 +6215,6 @@ win_free_popup(win_T *win)
     // the timer may have been cleared, making the pointer invalid
     if (timer_valid(win->w_popup_timer))
 	stop_timer(win->w_popup_timer);
-# endif
-# ifdef FEAT_IMAGE
-    vim_free(win->w_popup_image_data);
-#  ifdef FEAT_IMAGE_SIXEL
-    vim_free(win->w_popup_image_seq);
-#  endif
-#  if defined(FEAT_IMAGE_GDI) || defined(FEAT_IMAGE_CAIRO) \
-    || defined(FEAT_IMAGE_GDK)
-    gui_mch_free_popup_image(win);
-#  endif
 # endif
     vim_free(win->w_frame);
     win_free(win, NULL);

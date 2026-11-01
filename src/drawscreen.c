@@ -449,12 +449,9 @@ update_screen(int type_arg)
     }
 #endif
 
-#if defined(FEAT_IMAGE_GDI) || defined(FEAT_IMAGE_CAIRO) \
-    || defined(FEAT_IMAGE_GDK)
-    // GUI only: the cursor redraw and other late blits paint directly onto
-    // the canvas and may damage the popup images blitted by update_popups();
-    // restore the image layer.  No-op in terminal mode.
-    update_popup_images();
+#ifdef FEAT_IMAGE
+    // Make sure to do this last!
+    draw_image_placements();
 #endif
 
 #ifdef FEAT_EVAL
@@ -669,6 +666,9 @@ borrow_stl_vsep_hl(void)
     {
 	if (left->w_status_height == 0 || left->w_vsep_width == 0)
 	    continue;
+	// A window of zero width has no status line cell to borrow from.
+	if (left->w_width == 0)
+	    continue;
 	if (!stl_connected(left))
 	    continue;
 
@@ -712,6 +712,12 @@ borrow_stl_vsep_hl(void)
 	int dst_col = W_ENDCOL(left);
 	int src_col = (neighbour == curwin)
 				? neighbour->w_wincol : W_ENDCOL(left) - 1;
+
+	// The windows may be laid out for a size the screen does not have yet.
+	if (dst_col >= screen_Columns || src_col >= screen_Columns)
+	    continue;
+	if (end > screen_Rows)
+	    end = screen_Rows;
 
 	for (int r = start; r < end; r++)
 	{
@@ -2273,12 +2279,11 @@ win_update(win_T *wp)
 
 	// If we know the value of w_botline, use it to restrict the update to
 	// the lines that are visible in the window.
+	// Note: w_botline may be partially visible or completely invisible.
 	if (wp->w_valid & VALID_BOTLINE)
 	{
-	    if (from >= wp->w_botline)
-		from = wp->w_botline - 1;
-	    if (to >= wp->w_botline)
-		to = wp->w_botline - 1;
+	    from = MIN(from, wp->w_botline);
+	    to = MIN(to, wp->w_botline);
 	}
 
 	// Find the minimal part to be updated.
@@ -2779,10 +2784,10 @@ win_update(win_T *wp)
 		if ((*mb_off2cells)(LineOffset[k] + topframe->fr_width - 2,
 					   LineOffset[k] + screen_Columns) > 1)
 		    screen_draw_rectangle(k, topframe->fr_width - 2, 1, 2,
-			    FALSE);
+			    FALSE, FALSE);
 		else
 		    screen_draw_rectangle(k, topframe->fr_width - 1, 1, 1,
-			    FALSE);
+			    FALSE, FALSE);
 	    else
 		screen_char(LineOffset[k] + topframe->fr_width - 1, k,
 			cmdline_width - 1);
@@ -3055,7 +3060,7 @@ update_debug_sign(buf_T *buf, linenr_T lnum)
 # endif
 
     // update/delete a specific sign
-    redraw_buf_line_later(buf, lnum);
+    redraw_buf_range_later(buf, lnum, lnum);
 
     // check if it resulted in the need to redraw a window
     FOR_ALL_WINDOWS(wp)
@@ -3468,16 +3473,20 @@ redraw_buf_later(buf_T *buf, int type)
 #endif
 }
 
-#if defined(FEAT_SIGNS)
+#if defined(FEAT_PROP_POPUP) || defined(FEAT_SIGNS)
+/*
+ * Redraw lines "first" to "last" of buffer "buf" in the windows that show it,
+ * without marking the text as changed: the text, syntax state and line
+ * heights remain valid. Popup windows are not handled here.
+ */
     void
-redraw_buf_line_later(buf_T *buf, linenr_T lnum)
+redraw_buf_range_later(buf_T *buf, linenr_T first, linenr_T last)
 {
     win_T	*wp;
 
     FOR_ALL_WINDOWS(wp)
-	if (wp->w_buffer == buf && lnum >= wp->w_topline
-						  && lnum < wp->w_botline)
-	    redrawWinline(wp, lnum);
+	if (wp->w_buffer == buf)
+	    redraw_win_range_later(wp, first, last);
 }
 #endif
 
