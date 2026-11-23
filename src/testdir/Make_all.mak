@@ -135,6 +135,7 @@ NEW_TESTS = \
 	test_erasebackword \
 	test_escaped_glob \
 	test_eval_stuff \
+	test_ex_delete \
 	test_ex_equal \
 	test_ex_mode \
 	test_ex_undo \
@@ -246,6 +247,7 @@ NEW_TESTS = \
 	test_perl \
 	test_plugin_ccomplete \
 	test_plugin_comment \
+	test_plugin_csscomplete \
 	test_plugin_glvs \
 	test_plugin_gnat \
 	test_plugin_helpcurwin \
@@ -436,6 +438,7 @@ NEW_TESTS_RES = \
 	test_erasebackword.res \
 	test_escaped_glob.res \
 	test_eval_stuff.res \
+	test_ex_delete.res \
 	test_excmd.res \
 	test_exec_while_if.res \
 	test_execute_func.res \
@@ -531,6 +534,7 @@ NEW_TESTS_RES = \
 	test_perl.res \
 	test_plugin_ccomplete.res \
 	test_plugin_comment.res \
+	test_plugin_csscomplete.res \
 	test_plugin_glvs.res \
 	test_plugin_gnat.res \
 	test_plugin_helpcurwin.res \

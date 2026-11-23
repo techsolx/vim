@@ -463,12 +463,16 @@ func Test_prop_remove()
   unlet props[1] " [three]
   call assert_equal(props, prop_list(1))
 
-  " remove none by types
-  call assert_equal(0, prop_remove({'types': ['three', 'whole'], 'all': 1}, 1))
+  " remove none by types; the List does not get an extra reference
+  let types = ['three', 'whole']
+  let refcount = test_refcount(types)
+  call assert_equal(0, prop_remove({'types': types, 'all': 1}, 1))
   call assert_equal(props, prop_list(1))
+  call assert_equal(refcount, test_refcount(types))
 
   " no types
   call assert_fails("call prop_remove({'types': []}, 1)", 'E968:')
+  call assert_fails("call prop_remove({'types': test_null_list()}, 1)", 'E968:')
   call assert_fails("call prop_remove({'types': ['not_a_real_type']}, 1)", 'E971:')
 
   " only one of types and type can be supplied
@@ -1513,6 +1517,25 @@ func Test_textprop_in_empty_popup()
   call writefile(lines, 'XtestPropEmptyPopup', 'D')
   let buf = RunVimInTerminal('-S XtestPropEmptyPopup', #{rows: 20, cols: 40})
   call VerifyScreenDump(buf, 'Test_prop_in_empty_popup', {})
+
+  " clean up
+  call StopVimInTerminal(buf)
+endfunc
+
+func Test_emptying_buffer_with_textprop_text()
+  CheckScreendump
+
+  let lines =<< trim END
+    set cursorline wrap linebreak
+    call setline(1, "abc")
+    call prop_type_add("foo", {})
+    call prop_add(1, 3, #{text: "x", type: "foo"})
+  END
+  call writefile(lines, 'XtestPropEmptyingBuffer', 'D')
+  let buf = RunVimInTerminal('-S XtestPropEmptyingBuffer', {'rows': 6})
+  call VerifyScreenDump(buf, 'Test_emptying_buffer_with_textprop_text_1', {})
+  call term_sendkeys(buf, 'dd')
+  call VerifyScreenDump(buf, 'Test_emptying_buffer_with_textprop_text_2', {})
 
   " clean up
   call StopVimInTerminal(buf)
@@ -3683,6 +3706,76 @@ func Test_prop_with_text_above_smoothscroll()
 	    \ vtext .. ': CTRL-Y to screen ' .. idx)
     endfor
   endfor
+
+  call prop_type_delete('test')
+  bwipe!
+endfunc
+
+func Test_prop_with_text_above_nowrap_scroll()
+  call NewWindow(10, 40)
+  setlocal nowrap
+  call setline(1, ['AAAAAAAAAABBBBBBBBBBCCCCCCCCCCDDDDDDDDDDEEEEEEEEEEFFFFFFFFFF',
+        \ 'GGGGGGGGGGHHHHHHHHHHIIIIIIIIIIJJJJJJJJJJKKKKKKKKKKLLLLLLLLLL',
+        \ 'MMMMMMMMMMNNNNNNNNNNOOOOOOOOOOPPPPPPPPPPQQQQQQQQQQRRRRRRRRRR'])
+  call prop_type_add('test', #{highlight: 'Normal'})
+  call prop_add(1, 0, #{type: 'test', text: 'Example', text_align: 'above'})
+
+  let winid = win_getid()
+
+  call cursor(1, 40)
+  redraw
+  call assert_equal(0, winsaveview().leftcol)
+  call assert_equal([2, 40], [winline(), wincol()])
+  call assert_equal(#{row: 2, col: 40, endcol: 40, curscol: 40},
+        \ screenpos(winid, 1, 40))
+  call assert_equal(['Example', 'AAAAAAAAAABBBBBBBBBBCCCCCCCCCCDDDDDDDDDD',
+        \ 'GGGGGGGGGGHHHHHHHHHHIIIIIIIIIIJJJJJJJJJJ',
+        \ 'MMMMMMMMMMNNNNNNNNNNOOOOOOOOOOPPPPPPPPPP'],
+        \ ScreenLines([1, 4], 40)->map({_, v -> substitute(v, '\s*$', '', '')}))
+
+  call cursor(1, 41)
+  redraw
+  call assert_equal(20, winsaveview().leftcol)
+  call assert_equal([2, 21], [winline(), wincol()])
+  call assert_equal(#{row: 2, col: 21, endcol: 21, curscol: 21},
+        \ screenpos(winid, 1, 41))
+  call assert_equal(['Example', 'CCCCCCCCCCDDDDDDDDDDEEEEEEEEEEFFFFFFFFFF',
+        \ 'IIIIIIIIIIJJJJJJJJJJKKKKKKKKKKLLLLLLLLLL',
+        \ 'OOOOOOOOOOPPPPPPPPPPQQQQQQQQQQRRRRRRRRRR'],
+        \ ScreenLines([1, 4], 40)->map({_, v -> substitute(v, '\s*$', '', '')}))
+
+  call cursor(1, 1)
+  redraw
+  call assert_equal(0, winsaveview().leftcol)
+  call assert_equal([2, 1], [winline(), wincol()])
+  call assert_equal(#{row: 2, col: 1, endcol: 1, curscol: 1},
+        \ screenpos(winid, 1, 1))
+  call assert_equal(['Example', 'AAAAAAAAAABBBBBBBBBBCCCCCCCCCCDDDDDDDDDD',
+        \ 'GGGGGGGGGGHHHHHHHHHHIIIIIIIIIIJJJJJJJJJJ',
+        \ 'MMMMMMMMMMNNNNNNNNNNOOOOOOOOOOPPPPPPPPPP'],
+        \ ScreenLines([1, 4], 40)->map({_, v -> substitute(v, '\s*$', '', '')}))
+
+  call prop_remove(#{type: 'test', all: v:true})
+  %delete _
+
+  call setline(1, ['AAAAAAAAAABBBBBBBBBBCCCCCCCCCCDDDDDDDDDDEEEEEEEEEE'
+        \ .. 'FFFFFFFFFFGGGGGGGGGGHHHHHHHHHHIIIIIIIIIIJJJJJJJJJJ', 'short'])
+  call prop_add(1, 0, #{type: 'test', text: 'Above one', text_align: 'above'})
+  call prop_add(2, 0, #{type: 'test', text: 'Above two', text_align: 'above'})
+
+  call cursor(1, 100)
+  redraw
+  call assert_equal(79, winsaveview().leftcol)
+  call assert_equal([2, 21], [winline(), wincol()])
+  call assert_equal(#{row: 2, col: 21, endcol: 21, curscol: 21},
+        \ screenpos(winid, 1, 100))
+  call assert_equal(['Above one', 'HIIIIIIIIIIJJJJJJJJJJ', 'Above two', ''],
+        \ ScreenLines([1, 4], 40)->map({_, v -> substitute(v, '\s*$', '', '')}))
+
+  setlocal list listchars=eol:$,precedes:<
+  redraw
+  call assert_equal(['Above one', '<IIIIIIIIIIJJJJJJJJJJ$', 'Above two', '<'],
+        \ ScreenLines([1, 4], 40)->map({_, v -> substitute(v, '\s*$', '', '')}))
 
   call prop_type_delete('test')
   bwipe!

@@ -3159,13 +3159,18 @@ compile_assign_list_check_length(cctx_T *cctx, cac_T *cac)
 
 	if (isn->isn_type == ISN_NEWLIST || isn->isn_type == ISN_NEWTUPLE)
 	{
+	    // a size of -1 is used for null_list and null_tuple, they have no
+	    // items
+	    int	    list_len = isn->isn_arg.number < 0
+					    ? 0 : (int)isn->isn_arg.number;
+
 	    did_check = TRUE;
 	    if (cac->cac_semicolon ?
-			isn->isn_arg.number < needed_list_len
-			: isn->isn_arg.number != needed_list_len)
+			list_len < needed_list_len
+			: list_len != needed_list_len)
 	    {
 		semsg(_(e_expected_nr_items_but_got_nr),
-			needed_list_len, (int)isn->isn_arg.number);
+			needed_list_len, list_len);
 		return FAIL;
 	    }
 	}
@@ -3576,6 +3581,16 @@ compile_assign_compound_op(cctx_T *cctx, cac_T *cac)
 		&& need_type(stacktype, expected, 0, -1, 0, cctx,
 					FALSE, FALSE) == FAIL)
 	    return FAIL;
+	// The result is a string, a list or dict item of another type, e.g.
+	// a number, cannot hold it.
+	if (lhs->lhs_has_index && expected != NULL
+		&& expected->tt_type != VAR_STRING
+		&& expected->tt_type != VAR_ANY
+		&& expected->tt_type != VAR_UNKNOWN)
+	{
+	    emsg(_(e_can_only_concatenate_to_string));
+	    return FAIL;
+	}
 	// As with "a .. b", convert both operands: when the target type is
 	// any, its current value can be a number.
 	else if (may_generate_2STRING(-2, TOSTRING_NONE, cctx) == FAIL
@@ -4854,9 +4869,10 @@ compile_def_function_body(
 	    case CMD_lua:
 	    case CMD_mzscheme:
 	    case CMD_perl:
+	    case CMD_python:
 	    case CMD_py3:
 	    case CMD_python3:
-	    case CMD_python:
+	    case CMD_pyx:
 	    case CMD_pythonx:
 	    case CMD_ruby:
 	    case CMD_tcl:

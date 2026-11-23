@@ -10207,6 +10207,37 @@ def Test_class_object_index()
   v9.CheckScriptFailure(lines, 'E689: Index not allowed after a object: a[10] = 1', 5)
 enddef
 
+" Calling a method of a class variable in a skipped part of an expression in
+" a constructor
+def Test_method_call_in_skipped_expr()
+  var lines =<< trim END
+    vim9script
+
+    class A
+      def True(): bool
+        return true
+      enddef
+    endclass
+
+    class B
+      static var AO: A
+      static var result = ''
+
+      def new()
+        AO = A.new()
+
+        if has('eval') || AO.True()
+          result = 'works'
+        endif
+      enddef
+    endclass
+
+    var BO: B = B.new()
+    assert_equal('works', B.result)
+  END
+  v9.CheckSourceSuccess(lines)
+enddef
+
 def Test_class_member_init_typecheck()
   # Ensure the class member is assigned its declared type.
   var lines =<< trim END
@@ -11918,6 +11949,25 @@ func Test_class_selfref_gc()
   END
   call v9.CheckSourceSuccess(lines)
 endfunc
+
+" Adding an object to a List using the List length as the index should not
+" leave an extra reference to the class.
+def Test_list_append_object_refcount()
+  var lines =<< trim END
+    vim9script
+    class A
+    endclass
+    assert_equal(1, test_refcount(A))
+    var l: list<A> = []
+    for i in range(3)
+      l[i] = A.new()
+    endfor
+    assert_equal(4, test_refcount(A))
+    l = []
+    assert_equal(1, test_refcount(A))
+  END
+  v9.CheckSourceSuccess(lines)
+enddef
 
 " Test if class members can be accessed via a lambda inside a object/class
 " method.

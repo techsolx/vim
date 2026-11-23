@@ -2062,10 +2062,14 @@ compile_dict(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 
 	    // {[expr]: value} uses an evaluated key.
 	    *arg = skipwhite(*arg + 1);
-	    if (compile_expr0(arg, cctx) == FAIL)
+	    if (compile_expr0_ext(arg, cctx, &is_const) == FAIL)
 		goto failret;
+	    // Only when the key is a constant the last instruction pushes
+	    // it, e.g. for "c ? 1 : 2" it only pushes the second value.
 	    isn = ((isn_T *)instr->ga_data) + instr->ga_len - 1;
-	    if (isn->isn_type == ISN_PUSHNR)
+	    if (!is_const)
+		isn = NULL;
+	    if (isn != NULL && isn->isn_type == ISN_PUSHNR)
 	    {
 		char buf[NUMBUFLEN];
 
@@ -2074,7 +2078,7 @@ compile_dict(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 		isn->isn_type = ISN_PUSHS;
 		isn->isn_arg.string = vim_strsave((char_u *)buf);
 	    }
-	    if (isn->isn_type == ISN_PUSHS)
+	    if (isn != NULL && isn->isn_type == ISN_PUSHS)
 		key = isn->isn_arg.string;
 	    else if (may_generate_2STRING(-1, TOSTRING_NONE, cctx) == FAIL)
 		goto failret;
@@ -2654,7 +2658,9 @@ compile_parenthesis(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 	++*arg;
     else if (ret == OK)
     {
-	emsg(_(e_missing_closing_paren));
+	// Show where the expression stopped.  It is not at the end of the
+	// line, may_get_next_line_error() went to the next line or failed.
+	semsg(_(e_missing_closing_paren_str), *arg);
 	ret = FAIL;
     }
 
@@ -2728,7 +2734,8 @@ compile_subscript(
 	    if (keeping_dict)
 	    {
 		keeping_dict = FALSE;
-		if (generate_instr(cctx, ISN_CLEARDICT) == NULL)
+		if (cctx->ctx_skip != SKIP_YES
+			&& generate_instr(cctx, ISN_CLEARDICT) == NULL)
 		    return FAIL;
 	    }
 	}
@@ -2910,7 +2917,8 @@ compile_subscript(
 	    if (keeping_dict)
 	    {
 		keeping_dict = FALSE;
-		if (generate_instr(cctx, ISN_CLEARDICT) == NULL)
+		if (cctx->ctx_skip != SKIP_YES
+			&& generate_instr(cctx, ISN_CLEARDICT) == NULL)
 		    return FAIL;
 	    }
 	}
@@ -2984,7 +2992,8 @@ compile_subscript(
 	    if (keeping_dict)
 	    {
 		keeping_dict = FALSE;
-		if (generate_instr(cctx, ISN_CLEARDICT) == NULL)
+		if (cctx->ctx_skip != SKIP_YES
+			&& generate_instr(cctx, ISN_CLEARDICT) == NULL)
 		    return FAIL;
 	    }
 	    if (cctx->ctx_skip != SKIP_YES
@@ -3029,7 +3038,8 @@ compile_subscript(
 		    semsg(_(e_syntax_error_at_str), *arg);
 		    return FAIL;
 		}
-		if (keeping_dict && generate_instr(cctx, ISN_CLEARDICT) == NULL)
+		if (keeping_dict && cctx->ctx_skip != SKIP_YES
+			&& generate_instr(cctx, ISN_CLEARDICT) == NULL)
 		    return FAIL;
 		if (generate_STRINGMEMBER(cctx, *arg, p - *arg) == FAIL)
 		    return FAIL;
@@ -3772,6 +3782,14 @@ compile_expr4(char_u **arg, cctx_T *cctx, ppconst_T *ppconst)
 
 	if (compile_expr5(arg, cctx, ppconst) == FAIL)
 	    return FAIL;
+
+	// Another comparison operator cannot follow: "a < b < c".
+	p = may_peek_next_line(cctx, *arg, &next);
+	if (get_compare_type(p, &len, &type_is) != EXPR_UNKNOWN)
+	{
+	    semsg(_(e_comparison_operators_cannot_be_chained_str), p);
+	    return FAIL;
+	}
 
 	if (ppconst->pp_used == ppconst_used + 2)
 	{

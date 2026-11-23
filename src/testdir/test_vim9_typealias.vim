@@ -439,6 +439,13 @@ def Test_typealias_type_check()
   lines =<< trim END
     vim9script
     type Num = number
+    var x = <Num>'a'
+  END
+  v9.CheckSourceFailure(lines, 'E1012: Type mismatch; expected number but got string', 3)
+
+  lines =<< trim END
+    vim9script
+    type Num = number
     def Foo()
       var x = <Num>'a'
     enddef
@@ -1992,6 +1999,51 @@ def Test_typealias_func_argument()
   v9.CheckScriptSuccess(lines)
 enddef
 
+" Test for a type alias for a type that is compared by pointer, like "bool"
+" and "string"
+def Test_typealias_static_type()
+  var lines =<< trim END
+    vim9script
+    type MyBool = bool
+    var b: MyBool = 1
+    assert_equal(true, b)
+    assert_equal('bool', typename(b))
+    def Foo(x: MyBool): MyBool
+      return x
+    enddef
+    def Bar(): MyBool
+      var c: MyBool = 0
+      return c
+    enddef
+    def Baz(): MyBool
+      return Foo(1)
+    enddef
+    assert_equal(false, Bar())
+    assert_equal(true, Baz())
+  END
+  v9.CheckScriptSuccess(lines)
+
+  lines =<< trim END
+    vim9script
+    type MyBool = bool
+    var b: MyBool = 2
+  END
+  v9.CheckScriptFailure(lines, 'E1012: Type mismatch; expected bool but got number', 3)
+
+  # A number can be appended to a string
+  lines =<< trim END
+    vim9script
+    type MyStr = string
+    def Foo(): MyStr
+      var s: MyStr = 'a'
+      s ..= 1
+      return s
+    enddef
+    assert_equal('a1', Foo())
+  END
+  v9.CheckScriptSuccess(lines)
+enddef
+
 " Using a type alias with a builtin function
 def Test_typealias_with_builtin_functions()
   var lines =<< trim END
@@ -2077,6 +2129,88 @@ def Test_typealias_instanceof()
   v9.CheckScriptSuccess(lines)
 enddef
 
+" Test for text after a type alias or class name in a type
+def Test_typealias_trailing_name()
+  var lines =<< trim END
+    vim9script
+    type A = number
+    var x: A.foo = 1
+  END
+  v9.CheckSourceFailure(lines, 'E1010: Type not recognized: A.foo', 3)
+
+  lines =<< trim END
+    vim9script
+    type A = number
+    def Foo(): A.foo
+      return 1
+    enddef
+  END
+  v9.CheckSourceFailure(lines, 'E1010: Type not recognized: A.foo', 3)
+
+  lines =<< trim END
+    vim9script
+    class C
+    endclass
+    var o: C.foo = C.new()
+  END
+  v9.CheckSourceFailure(lines, 'E1010: Type not recognized: C.foo', 4)
+
+  lines =<< trim END
+    vim9script
+    export type MyType = number
+  END
+  writefile(lines, 'Xtypetrailing.vim', 'D')
+  lines =<< trim END
+    vim9script
+    import './Xtypetrailing.vim' as Imp
+    var n: Imp.MyType = 1
+    assert_equal(1, n)
+    var m: Imp.MyType.foo = 1
+  END
+  v9.CheckScriptFailure(lines, 'E1010: Type not recognized: Imp.MyType.foo', 5)
+
+  # type alias and class from an imported script and an autoload script
+  lines =<< trim END
+    vim9script
+    export type MyList = list<number>
+    export class MyClass
+    endclass
+  END
+  writefile(lines, 'Xtypetrailing2.vim', 'D')
+  writefile(lines, 'Xtypetrailing3.vim', 'D')
+  lines =<< trim END
+    vim9script
+    import './Xtypetrailing2.vim' as Imp
+    import autoload './Xtypetrailing3.vim' as Au
+    var l1: Imp.MyList = [1]
+    var o1: Imp.MyClass = Imp.MyClass.new()
+    var l2: Au.MyList = [2]
+    var o2: Au.MyClass = Au.MyClass.new()
+    def Foo(x: Au.MyList): string
+      var y: Imp.MyList = x
+      return typename(y)
+    enddef
+    assert_equal('list<number>', Foo([3]))
+    assert_equal('object<MyClass>', typename(o1))
+    assert_equal('object<MyClass>', typename(o2))
+  END
+  v9.CheckScriptSuccess(lines)
+
+  lines =<< trim END
+    vim9script
+    import './Xtypetrailing2.vim' as Imp
+    var o: Imp.MyClass.foo = Imp.MyClass.new()
+  END
+  v9.CheckScriptFailure(lines, 'E1010: Type not recognized: Imp.MyClass.foo', 3)
+
+  lines =<< trim END
+    vim9script
+    import autoload './Xtypetrailing3.vim' as Au
+    var l: Au.MyList.foo = [1]
+  END
+  v9.CheckScriptFailure(lines, 'E1010: Type not recognized: Au.MyList.foo', 3)
+enddef
+
 " Test for type aliasing a class
 def Test_typealias_class()
   var lines =<< trim END
@@ -2090,6 +2224,64 @@ def Test_typealias_class()
   END
   v9.CheckScriptSuccess(lines)
 enddef
+
+" Test for a type alias for "object<any>"
+def Test_typealias_object_any()
+  var lines =<< trim END
+    vim9script
+    type AnyObj = object<any>
+    class C
+    endclass
+    var o: AnyObj = C.new()
+    assert_equal('object<C>', typename(o))
+    assert_equal('typealias<object<any>>', typename(AnyObj))
+    assert_equal(v:t_typealias, type(AnyObj))
+    def Foo(x: AnyObj): AnyObj
+      return x
+    enddef
+    assert_equal(o, Foo(o))
+    assert_fails('instanceof(o, AnyObj)', 'E693: Class or class typealias required for argument 2')
+
+    def G<T>(x: T): T
+      return x
+    enddef
+    assert_equal(o, G<AnyObj>(o))
+    class D
+      var m: AnyObj = C.new()
+    endclass
+    assert_equal('object<C>', typename(D.new().m))
+    var l: list<AnyObj> = [o, D.new()]
+    assert_equal('list<object<any>>', typename(l))
+  END
+  v9.CheckScriptSuccess(lines)
+
+  lines =<< trim END
+    vim9script
+    type AnyObj = object<any>
+    var o: AnyObj = 10
+  END
+  v9.CheckScriptFailure(lines, 'E1012: Type mismatch; expected object<any> but got number', 3)
+enddef
+
+" Test for garbage collection with a type alias for "object<any>"
+func Test_typealias_object_any_garbagecollect()
+  let lines =<< trim END
+    vim9script
+    type AnyObj = object<any>
+    class C
+      public var other: any
+    endclass
+    var o: AnyObj = C.new()
+    o.other = o
+    test_garbagecollect_now()
+    assert_equal('object<C>', typename(o.other))
+    o = null_object
+    test_garbagecollect_now()
+    var p: AnyObj = C.new()
+    assert_equal('object<C>', typename(p))
+  END
+  call v9.CheckSourceSuccess(lines)
+endfunc
 
 " Test for typealias as function arg and return value
 def Test_type_as_func_argument_or_return_value()
@@ -2324,6 +2516,77 @@ def Test_class_as_func_argument_or_return_value()
   END
   v9.CheckScriptFailure(lines, 'E1405: Class "C" cannot be used as a value', 1)
 enddef
+
+" Test for sourcing a "noclear" script with a type alias again
+def Test_typealias_noclear_reload()
+  var lines =<< trim END
+    vim9script noclear
+    type NcType = list<number>
+    var nc_var: NcType = [1]
+    g:TypeAliasNoclear = typename(NcType)
+  END
+  writefile(lines, 'Xtypenoclear.vim', 'D')
+  source Xtypenoclear.vim
+  source Xtypenoclear.vim
+  assert_equal('typealias<list<number>>', g:TypeAliasNoclear)
+
+  # the type can be changed when sourcing the script again
+  lines[1] = 'type NcType = list<string>'
+  lines[2] = "var nc_var: NcType = ['a']"
+  writefile(lines, 'Xtypenoclear.vim')
+  source Xtypenoclear.vim
+  assert_equal('typealias<list<string>>', g:TypeAliasNoclear)
+  unlet g:TypeAliasNoclear
+
+  # a type alias can still be defined only once in the script
+  lines =<< trim END
+    vim9script noclear
+    type NcType2 = number
+    type NcType2 = number
+  END
+  v9.CheckScriptFailure(lines, 'E1396: Type alias "NcType2" already exists', 3)
+
+  # A lambda using the type alias, defined when the script was first sourced,
+  # still checks the type
+  lines =<< trim END
+    vim9script noclear
+    type NcType3 = list<dict<list<string>>>
+    if !exists('g:TypeAliasNcFn')
+      g:TypeAliasNcFn = (x: NcType3): number => len(x)
+    endif
+  END
+  writefile(lines, 'Xtypenoclear2.vim', 'D')
+  source Xtypenoclear2.vim
+  source Xtypenoclear2.vim
+  assert_equal(1, g:TypeAliasNcFn([{a: ['x']}]))
+  assert_fails('g:TypeAliasNcFn([{a: [1]}])', 'E1013: Argument 1: type mismatch, expected list<dict<list<string>>> but got list<dict<list<number>>>')
+  unlet g:TypeAliasNcFn
+enddef
+
+" Test for garbage collection when sourcing a "noclear" script with a type
+" alias again
+func Test_typealias_noclear_reload_garbagecollect()
+  let lines =<< trim END
+    vim9script noclear
+    type NcGcType = list<dict<list<string>>>
+    if !exists('g:TypeAliasNcGcFn')
+      g:TypeAliasNcGcFn = (x: NcGcType): number => len(x)
+    endif
+  END
+  call writefile(lines, 'Xtypenocleargc.vim', 'D')
+
+  let lines =<< trim END
+    vim9script
+    source Xtypenocleargc.vim
+    test_garbagecollect_now()
+    source Xtypenocleargc.vim
+    test_garbagecollect_now()
+    assert_equal(1, g:TypeAliasNcGcFn([{a: ['x']}]))
+    assert_fails('g:TypeAliasNcGcFn([{a: [1]}])', 'E1013: Argument 1: type mismatch, expected list<dict<list<string>>> but got list<dict<list<number>>>')
+  END
+  call v9.CheckSourceSuccess(lines)
+  unlet g:TypeAliasNcGcFn
+endfunc
 
 def Test_passing_typealias_to_builtin()
   # type, typename, string, instanceof are allowed type argument

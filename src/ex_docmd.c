@@ -2251,6 +2251,22 @@ do_one_cmd(
 #endif
 
     /*
+     * ":d[elete]" may be immediately followed by any number of contiguous 'l',
+     * 'p' or '#' flags (not in Vim9 script)
+     */
+    if (!in_vim9script() && ea.cmdidx == CMD_delete)
+	while (vim_strchr((char_u *)"lp#", *p) != NULL)
+	{
+	    if (*p == 'l')
+		ea.flags |= EXFLAG_LIST;
+	    else if (*p == 'p')
+		ea.flags |= EXFLAG_PRINT;
+	    else
+		ea.flags |= EXFLAG_NR;
+	    ++p;
+	}
+
+    /*
      * Skip to start of argument.
      * Don't do this for the ":!" command, because ":!! -l" needs the space.
      */
@@ -3139,6 +3155,7 @@ parse_command_modifiers(
 				break;
 			    if (!skip_only)
 			    {
+				vim_regfree(cmod->cmod_filter_regmatch.regprog);
 				cmod->cmod_filter_regmatch.regprog =
 						vim_regcomp(reg_pat, RE_MAGIC);
 				if (cmod->cmod_filter_regmatch.regprog == NULL)
@@ -3755,7 +3772,6 @@ find_ex_command(
 {
     int		len;
     char_u	*p;
-    int		i;
 #ifndef FEAT_EVAL
     int		vim9 = FALSE;
 #else
@@ -4025,23 +4041,31 @@ find_ex_command(
 	// check for non-alpha command
 	if (p == eap->cmd && vim_strchr((char_u *)"@*!=><&~#}", *p) != NULL)
 	    ++p;
+
 	len = (int)(p - eap->cmd);
-	// The "d" command can directly be followed by 'l' or 'p' flag, when
-	// not in Vim9 script.
-	if (!vim9 && *eap->cmd == 'd' && (p[-1] == 'l' || p[-1] == 'p'))
+
+	// ":d[elete]" may be immediately followed by any number of contiguous
+	// 'l' or 'p' flags (not in Vim9 script)
+	if (!vim9 && *eap->cmd == 'd')
 	{
-	    // Check for ":dl", ":dell", etc. to ":deletel": that's
-	    // :delete with the 'l' flag.  Same for 'p'.
-	    for (i = 0; i < len; ++i)
-		if (eap->cmd[i] != ((char_u *)"delete")[i])
+	    int cmdlen;   // length of d\%[elete]
+	    int matchlen; // length of d\%[elete][lp]*
+
+	    // longest prefix of the name that matches "delete"
+	    for (cmdlen = 0; cmdlen < len; ++cmdlen)
+		if (eap->cmd[cmdlen] != ((char_u *)"delete")[cmdlen])
 		    break;
-	    if (i == len - 1)
+
+	    // the rest of the candidate match must be 'l' or 'p' flags,
+	    // otherwise this is another command like ":dl[ist]"
+	    for (matchlen = cmdlen; matchlen < len; ++matchlen)
+		if (eap->cmd[matchlen] != 'l' && eap->cmd[matchlen] != 'p')
+		    break;
+
+	    if (matchlen == len)
 	    {
-		--len;
-		if (p[-1] == 'l')
-		    eap->flags |= EXFLAG_LIST;
-		else
-		    eap->flags |= EXFLAG_PRINT;
+		len = cmdlen;
+		p = eap->cmd + cmdlen;
 	    }
 	}
 
@@ -4266,6 +4290,9 @@ ex_command_attrs(dict_T *d, long_u argt, cmd_addr_T addr_type, long def)
 	"none"
     };
     char	*nargs;
+    char	*range;
+    char	numbuf[NUMBUFLEN];
+    long	count = -1;
 
     if (!(argt & EX_EXTRA))
 	nargs = "0";
@@ -4278,17 +4305,22 @@ ex_command_attrs(dict_T *d, long_u argt, cmd_addr_T addr_type, long def)
     dict_add_string(d, "nargs", (char_u *)nargs);
 
     if (!(argt & EX_RANGE))
-	dict_add_bool(d, "range", FALSE);
+	range = "";
     else if (argt & EX_DFLALL)
-	dict_add_string(d, "range", (char_u *)"%");
+	range = "%";
     else if (def >= 0 && !(argt & EX_COUNT))
-	dict_add_number(d, "range", def);
+    {
+	// "-range=N": the default count in the place of the range, as listed
+	// by ":command".
+	vim_snprintf(numbuf, sizeof(numbuf), "%ld", def);
+	range = numbuf;
+    }
     else
-	dict_add_string(d, "range", (char_u *)".");
-    if (!(argt & EX_COUNT))
-	dict_add_bool(d, "count", FALSE);
-    else
-	dict_add_number(d, "count", def < 0 ? 0 : def);
+	range = ".";
+    if (argt & EX_COUNT)
+	count = def < 0 ? 0 : def;
+    dict_add_string(d, "range", (char_u *)range);
+    dict_add_number(d, "count", count);
     dict_add_bool(d, "bang", (argt & EX_BANG) != 0);
     dict_add_bool(d, "bar", (argt & EX_TRLBAR) != 0);
     dict_add_bool(d, "register", (argt & EX_REGSTR) != 0);
